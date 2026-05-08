@@ -48,11 +48,11 @@ if [[ -z "$SCRIPT_PATH" ]] || [[ ! -d "$SCRIPT_PATH/skills" ]]; then
   # Re-exec with stdin redirected to the terminal — when piped via curl,
   # the original stdin is the curl output (EOF by now), so any later
   # `read` prompt would return immediately and abort the install.
-  if [[ -r /dev/tty ]]; then
+  # Test the redirect itself (file existence isn't enough — the process
+  # group may have no controlling terminal even when /dev/tty exists).
+  if : </dev/tty 2>/dev/null; then
     exec bash install.sh "$@" </dev/tty
   else
-    echo "✗ No terminal available (/dev/tty not readable)." >&2
-    echo "  Pass --systems=asana,shortcut to skip interactive prompts." >&2
     exec bash install.sh "$@"
   fi
 fi
@@ -138,7 +138,7 @@ else
   echo "     3) Linear"
   echo "     4) Jira"
   echo ""
-  if [[ -r /dev/tty ]]; then
+  if : </dev/tty 2>/dev/null; then
     read -rp "  > " choice </dev/tty
   else
     err "Interactive prompt needed but no terminal available."
@@ -266,7 +266,7 @@ setup_token() {
   echo ""
   echo "   $var"
   echo "   Generate at: $where"
-  if [[ -r /dev/tty ]]; then
+  if : </dev/tty 2>/dev/null; then
     read -rp "   Paste token (or leave blank to skip): " token </dev/tty
   else
     warn "no terminal available — skipping (set ${var}=... in $ENV_FILE manually)"
