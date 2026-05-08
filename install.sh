@@ -319,24 +319,52 @@ done
 # auto-memory system is per-project — files dropped at $CLAUDE_HOME/memory/
 # don't load in any session. The user-global $CLAUDE_HOME/CLAUDE.md is
 # the right surface for rules that should apply across every project.
+#
+# The PM section is wrapped in <!-- BEGIN/END: fraction-pm-skills -->
+# markers so re-runs replace JUST that section — anything the user added
+# above or below the markers is preserved untouched.
 echo ""
 echo "7. PM operating mode in $USER_CLAUDE_MD"
 PM_CLAUDE_TEMPLATE="$BUNDLE_DIR/PM-CLAUDE.md"
+BEGIN_MARK="<!-- BEGIN: fraction-pm-skills"
+END_MARK="<!-- END: fraction-pm-skills -->"
 
 if [[ ! -f "$PM_CLAUDE_TEMPLATE" ]]; then
   warn "PM-CLAUDE.md template missing from bundle — skipping"
-else
-  if [[ -f "$USER_CLAUDE_MD" ]] && grep -q "Fraction PM operating mode" "$USER_CLAUDE_MD"; then
-    say "PM section already present — skipping"
+elif [[ ! -f "$USER_CLAUDE_MD" ]]; then
+  do_step "cp '$PM_CLAUDE_TEMPLATE' '$USER_CLAUDE_MD'"
+  ok "created $USER_CLAUDE_MD"
+elif grep -qF "$BEGIN_MARK" "$USER_CLAUDE_MD" && grep -qF "$END_MARK" "$USER_CLAUDE_MD"; then
+  # Markers present — replace content between them (idempotent update path).
+  if [[ $DRY_RUN -eq 1 ]]; then
+    say "(dry-run) replace PM section between markers in $USER_CLAUDE_MD"
   else
-    if [[ ! -f "$USER_CLAUDE_MD" ]]; then
-      do_step "cp '$PM_CLAUDE_TEMPLATE' '$USER_CLAUDE_MD'"
-      ok "created $USER_CLAUDE_MD"
-    else
-      do_step "{ echo ''; cat '$PM_CLAUDE_TEMPLATE'; } >> '$USER_CLAUDE_MD'"
-      ok "appended PM section to $USER_CLAUDE_MD"
-    fi
+    awk -v new_file="$PM_CLAUDE_TEMPLATE" '
+      BEGIN { skip = 0 }
+      /<!-- BEGIN: fraction-pm-skills/ {
+        while ((getline line < new_file) > 0) print line
+        close(new_file)
+        skip = 1
+        next
+      }
+      /<!-- END: fraction-pm-skills -->/ {
+        if (skip) { skip = 0; next }
+      }
+      !skip { print }
+    ' "$USER_CLAUDE_MD" > "$USER_CLAUDE_MD.tmp" && mv "$USER_CLAUDE_MD.tmp" "$USER_CLAUDE_MD"
+    ok "updated PM section in $USER_CLAUDE_MD (content between markers replaced)"
   fi
+elif grep -qF "Fraction PM operating mode" "$USER_CLAUDE_MD"; then
+  # Legacy install: PM content is present but lacks markers. Replace the
+  # whole block so future updates can use the marker path. We don't know
+  # exactly where it starts/ends without markers — safest: append a fresh
+  # marked block and tell the user to manually delete the un-marked old one.
+  do_step "{ echo ''; cat '$PM_CLAUDE_TEMPLATE'; } >> '$USER_CLAUDE_MD'"
+  warn "found legacy un-marked PM section in $USER_CLAUDE_MD"
+  warn "  appended fresh marked block — manually delete the old un-marked section"
+else
+  do_step "{ echo ''; cat '$PM_CLAUDE_TEMPLATE'; } >> '$USER_CLAUDE_MD'"
+  ok "appended PM section to $USER_CLAUDE_MD"
 fi
 
 # ── Done ──────────────────────────────────────────────────────────────

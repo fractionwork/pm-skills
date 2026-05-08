@@ -1,3 +1,4 @@
+<!-- BEGIN: fraction-pm-skills (managed by the pm-skills installer; content between these markers is overwritten on each install/update) -->
 # Fraction PM operating mode
 
 This Claude Code instance is configured for Project / Product Management work
@@ -93,7 +94,15 @@ This is the PM-only bundle. The full DevHawk seed (used by Fraction engineers) i
 
 ## Updating
 
-Re-run the install command (curl one-liner or `bash install.sh` from a clone). The installer is idempotent — safe to run as often as needed.
+Run the same one-liner anytime — it always fetches the latest version:
+
+```bash
+curl -sSL https://raw.githubusercontent.com/fractionwork/pm-skills/main/install.sh | bash
+```
+
+The installer is idempotent and only touches the section between the
+`<!-- BEGIN: fraction-pm-skills -->` markers in this file. Anything you
+added above or below those markers is preserved.
 
 ## Where things live
 
@@ -111,3 +120,5 @@ When you leave Fraction or want to rotate access:
 3. Re-run the install command if you want to set a fresh one up.
 
 For Asana plugin OAuth: open Claude Code, run the plugin's logout flow, then re-auth on next use.
+<!-- END: fraction-pm-skills -->
+

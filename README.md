@@ -83,9 +83,32 @@ The right skill loads automatically based on what you said.
 
 ## Updating
 
-If you used the one-liner: just run it again — the installer always self-fetches the latest version.
+Run the same one-liner anytime — it always fetches and installs the latest:
 
-If you cloned:
+```bash
+curl -sSL https://raw.githubusercontent.com/fractionwork/pm-skills/main/install.sh | bash
+```
+
+What gets updated on every run:
+
+- **Skills** in `~/.claude/skills/<skill>/` — overwritten with the latest
+- **Scripts** in `~/.claude/scripts/` — overwritten with the latest
+- **PM operating rules** in `~/.claude/CLAUDE.md` — *only* the section between the `<!-- BEGIN: fraction-pm-skills -->` and `<!-- END: fraction-pm-skills -->` markers is replaced. Anything you added above or below those markers is preserved.
+
+What is NOT touched:
+
+- Tokens in `~/.claude/.env` — your stored credentials
+- Existing Asana OAuth token in `~/.claude/scripts/.asana-token.json`
+- Any other content in `~/.claude/CLAUDE.md` outside the markers
+- Your other skills, plugins, or MCP servers
+
+Cron / auto-update is not built in by design — running the installer is a deliberate "I want the latest" action. To check what would change before applying:
+
+```bash
+curl -sSL https://raw.githubusercontent.com/fractionwork/pm-skills/main/install.sh | bash -s -- --dry-run
+```
+
+If you cloned the repo locally instead:
 
 ```bash
 cd pm-skills
