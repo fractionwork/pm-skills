@@ -45,7 +45,16 @@ if [[ -z "$SCRIPT_PATH" ]] || [[ ! -d "$SCRIPT_PATH/skills" ]]; then
     exit 1
   fi
   cd "$TMP/pm-skills"
-  exec bash install.sh "$@"
+  # Re-exec with stdin redirected to the terminal — when piped via curl,
+  # the original stdin is the curl output (EOF by now), so any later
+  # `read` prompt would return immediately and abort the install.
+  if [[ -r /dev/tty ]]; then
+    exec bash install.sh "$@" </dev/tty
+  else
+    echo "✗ No terminal available (/dev/tty not readable)." >&2
+    echo "  Pass --systems=asana,shortcut to skip interactive prompts." >&2
+    exec bash install.sh "$@"
+  fi
 fi
 
 DRY_RUN=0
@@ -129,7 +138,13 @@ else
   echo "     3) Linear"
   echo "     4) Jira"
   echo ""
-  read -rp "  > " choice
+  if [[ -r /dev/tty ]]; then
+    read -rp "  > " choice </dev/tty
+  else
+    err "Interactive prompt needed but no terminal available."
+    err "  Run with --systems=asana,shortcut (or similar) to skip."
+    exit 1
+  fi
   SYSTEMS=()
   for c in $choice; do
     case "$c" in
@@ -251,7 +266,12 @@ setup_token() {
   echo ""
   echo "   $var"
   echo "   Generate at: $where"
-  read -rp "   Paste token (or leave blank to skip): " token
+  if [[ -r /dev/tty ]]; then
+    read -rp "   Paste token (or leave blank to skip): " token </dev/tty
+  else
+    warn "no terminal available — skipping (set ${var}=... in $ENV_FILE manually)"
+    return
+  fi
   if [[ -z "$token" ]]; then
     warn "skipped — set later by adding ${var}=... to $ENV_FILE"
     return
