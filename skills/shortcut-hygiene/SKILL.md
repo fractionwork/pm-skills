@@ -4,9 +4,11 @@ description: >
   Audit and fix a Shortcut project against Fraction best practices. Checks for
   missing Priority custom field, stories without estimates/owners/types, missing
   epics, vague titles, empty descriptions, workflow state coverage, and stale
-  Inbox stories (>30 days). Field-strict checks (estimate / owner / type /
-  Priority / epic / Iteration) skip Inbox-state stories — those are deferred
-  until Inbox → Unscheduled promotion. Reports gaps with story name + permalink
+  Inbox stories (>30 days). Field-strict checks (estimate / type / Priority /
+  epic / Iteration) skip Inbox stories — those are deferred until Inbox →
+  Unscheduled promotion. The owner check skips Inbox AND Unscheduled — both
+  are intentionally unassigned per the three-tier rule (ownership lands at
+  sprint planning when a story moves to Started+). Reports gaps with story name + permalink
   under each non-zero category and offers fixes. Can also enrich the backlog
   from meeting transcripts, emails, and chat. **Always enforces all best
   practices by default** — only skip checks if the user explicitly opts out.
@@ -33,7 +35,7 @@ AskUserQuestion — header: "Project", question: "Which Shortcut project to audi
 
 ## Step 2: Audit
 
-Field-strict checks (estimate / owner / story_type / Priority / epic / Iteration) **skip stories in the Inbox workflow state** — those gaps get filled at the Inbox → Unscheduled promotion conversation, not before. Title / description / source-attribution checks still apply to Inbox. See @docs/shortcut-best-practices.md for the per-state field requirement table.
+Field-strict checks (estimate / story_type / Priority / epic / Iteration) **skip stories in the Inbox workflow state** — those gaps get filled at the Inbox → Unscheduled promotion conversation, not before. The **owner check is stricter** — it skips Inbox AND Unscheduled (the BACKLOG-equivalent), only flagging Started+ stories without an owner. Title / description / source-attribution checks still apply to Inbox. See @docs/shortcut-best-practices.md for the per-state field requirement table.
 
 ### 2.1 Priority custom field
 Check if a workspace-level "Priority" enum field exists with P0-P3 values.
@@ -44,8 +46,8 @@ GET /custom-fields
 ### 2.2 Story estimates (excl. Inbox)
 Every non-Inbox story should have an `estimate` (built-in field). Inbox stories deliberately deferred.
 
-### 2.3 Story owners (excl. Inbox)
-Every non-Inbox story should have at least one `owner_id`. Inbox stories stay unassigned.
+### 2.3 Story owners (Started+ only)
+Stories in `started`-type workflow states (and beyond) should have at least one `owner_id`. **Both Inbox AND Unscheduled stories stay unassigned** — three-tier rule: Inbox = unrefined, Unscheduled = refined-but-not-yet-pulled-into-active-work, Started+ = ownership required. This mirrors Asana's INBOX/BACKLOG/TODO+ split.
 
 ### 2.4 Story types (excl. Inbox)
 Every non-Inbox story should have a `story_type` (`feature`, `bug`, or `chore`). Inbox deliberately deferred.

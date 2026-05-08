@@ -169,15 +169,25 @@ def audit_project(project_name, fix=False):
     # Get workflow states. Identify Inbox state(s) (case-insensitive name match,
     # type=unstarted) so field-strict checks can skip them — same model as
     # asana_ops.py's LIGHT_VALIDATION_SECTIONS for "INBOX".
+    # Also identify Unscheduled / Backlog states — the Shortcut equivalent of
+    # the Asana BACKLOG section. Stories there are validated but unassigned;
+    # the owner check must skip them too. Three-tier rule:
+    #   Inbox       → unrefined, no fields, no owner
+    #   Unscheduled → refined fields populated, owner unassigned
+    #   Started+    → owner required
     workflows = api("GET", "/workflows")
     states = {}
     inbox_state_ids = set()
+    unscheduled_state_ids = set()
     if workflows:
         for wf in workflows:
             for s in wf.get("states", []):
                 states[s["id"]] = {"name": s["name"], "type": s["type"]}
-                if s["type"] == "unstarted" and s.get("name", "").strip().lower() == "inbox":
+                lname = s.get("name", "").strip().lower()
+                if s["type"] == "unstarted" and lname == "inbox":
                     inbox_state_ids.add(s["id"])
+                if s["type"] == "unstarted" and lname in ("unscheduled", "backlog"):
+                    unscheduled_state_ids.add(s["id"])
 
     # Get stories in this project
     stories = api("GET", f"/projects/{pid}/stories")
@@ -229,9 +239,11 @@ def audit_project(project_name, fix=False):
     print(f"  No estimate (excl. Inbox): {len(no_estimate)} of {len(strict)}")
     _print_offenders(no_estimate)
 
-    # 3. Stories without owner — strict only
-    no_owner = [s for s in strict if not s.get("owner_ids")]
-    print(f"  No owner (excl. Inbox): {len(no_owner)} of {len(strict)}")
+    # 3. Stories without owner — Started+ only (Unscheduled is intentionally
+    # unassigned, same as Asana BACKLOG; ownership lands at sprint planning).
+    owner_required = [s for s in strict if s.get("workflow_state_id") not in unscheduled_state_ids]
+    no_owner = [s for s in owner_required if not s.get("owner_ids")]
+    print(f"  No owner (Started+ only): {len(no_owner)} of {len(owner_required)}")
     _print_offenders(no_owner)
 
     # 4. Stories without story_type — strict only
