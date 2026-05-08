@@ -20,6 +20,11 @@ set -euo pipefail
 REPO_URL="${PM_SKILLS_REPO_URL:-https://github.com/fractionwork/pm-skills.git}"
 REPO_BRANCH="${PM_SKILLS_REPO_BRANCH:-main}"
 
+# /dev/tty probe — wrapped in a subshell because bash sometimes prints
+# redirect-failure errors to the original stderr even when 2>/dev/null
+# is on the same line. The subshell's stderr is fully captured.
+has_tty() { (exec </dev/tty) 2>/dev/null; }
+
 # ── Self-fetch path ────────────────────────────────────────────────────
 # When invoked via `curl ... | bash`, BASH_SOURCE is empty / the script
 # isn't on disk, and the bundle files (skills/, scripts/, memory/) aren't
@@ -50,7 +55,7 @@ if [[ -z "$SCRIPT_PATH" ]] || [[ ! -d "$SCRIPT_PATH/skills" ]]; then
   # `read` prompt would return immediately and abort the install.
   # Test the redirect itself (file existence isn't enough — the process
   # group may have no controlling terminal even when /dev/tty exists).
-  if : </dev/tty 2>/dev/null; then
+  if has_tty; then
     exec bash install.sh "$@" </dev/tty
   else
     exec bash install.sh "$@"
@@ -85,6 +90,7 @@ say() { printf "  %s\n" "$*"; }
 ok()  { printf "  ✓ %s\n" "$*"; }
 warn(){ printf "  ⚠ %s\n" "$*"; }
 err() { printf "  ✗ %s\n" "$*" >&2; }
+
 do_step() {
   if [[ $DRY_RUN -eq 1 ]]; then
     say "(dry-run) $*"
@@ -138,7 +144,7 @@ else
   echo "     3) Linear"
   echo "     4) Jira"
   echo ""
-  if : </dev/tty 2>/dev/null; then
+  if has_tty; then
     read -rp "  > " choice </dev/tty
   else
     err "Interactive prompt needed but no terminal available."
@@ -206,45 +212,30 @@ for sys in "${SYSTEMS[@]}"; do
   esac
 done
 
-# ── Step 5: MCP / plugin install instructions ─────────────────────────
+# ── Step 5: Install MCP servers + plugins ─────────────────────────────
 echo ""
-echo "5. MCP servers and plugins"
-echo "   Run these commands yourself — auth is per-user and the installer"
-echo "   can't complete the OAuth flow on your behalf."
-echo ""
+echo "5. Installing MCP servers + plugins..."
 for sys in "${SYSTEMS[@]}"; do
   case "$sys" in
     asana)
-      cat <<'EOF'
-   Asana
-     claude plugin install asana
-     # then authenticate: open Claude Code, run /plugin asana, follow OAuth
-EOF
-      ;;
-    shortcut)
-      cat <<'EOF'
-   Shortcut
-     # No official MCP — script-based only.
-     # Generate a token: https://app.shortcut.com/settings/account/api-tokens
-     # The installer will prompt for it next.
-EOF
+      # Plugin install is idempotent — second run reports "already installed"
+      # and exits 0. Safe to re-run.
+      do_step "claude plugin install asana"
+      ok "asana plugin: installed (auth on first use inside Claude Code)"
       ;;
     linear)
-      cat <<'EOF'
-   Linear
-     claude mcp add linear https://mcp.linear.app/mcp
-     # then authenticate via the OAuth flow Claude prompts for on first use
-EOF
+      # MCP add is idempotent on the same name — overwrites silently.
+      do_step "claude mcp add --transport http linear https://mcp.linear.app/mcp"
+      ok "linear MCP: configured (auth on first use)"
       ;;
     jira)
-      cat <<'EOF'
-   Jira
-     claude mcp add atlassian-rovo https://mcp.atlassian.com/v1/sse
-     # then authenticate via OAuth on first use
-EOF
+      do_step "claude mcp add --transport sse atlassian-rovo https://mcp.atlassian.com/v1/sse"
+      ok "atlassian-rovo MCP: configured (auth on first use)"
+      ;;
+    shortcut)
+      say "shortcut: no official MCP — script-based only (token prompt next)"
       ;;
   esac
-  echo ""
 done
 
 # ── Step 6: Token setup (per system that uses scripts) ────────────────
@@ -266,7 +257,7 @@ setup_token() {
   echo ""
   echo "   $var"
   echo "   Generate at: $where"
-  if : </dev/tty 2>/dev/null; then
+  if has_tty; then
     read -rp "   Paste token (or leave blank to skip): " token </dev/tty
   else
     warn "no terminal available — skipping (set ${var}=... in $ENV_FILE manually)"
@@ -284,12 +275,41 @@ setup_token() {
 for sys in "${SYSTEMS[@]}"; do
   case "$sys" in
     asana)
-      # Asana script supports OAuth (preferred) or PAT.
-      say "asana_ops.py uses OAuth by default — first run will open a browser."
-      say "  PAT fallback: set ASANA_PAT in $ENV_FILE if OAuth doesn't work."
+      # Two Asana auth surfaces:
+      #   1. MCP plugin — OAuth via Anthropic's app, on first use inside Claude Code.
+      #      Can't be triggered from the shell; the user grants consent in Claude Code.
+      #   2. asana_ops.py script — PKCE OAuth, browser flow, can run NOW from this
+      #      installer. Token stored in .asana-token.json next to the script.
+      echo ""
+      echo "   Asana auth has two surfaces:"
+      echo "     • MCP plugin: granted in Claude Code on first Asana operation (browser OAuth)"
+      echo "     • asana_ops.py script: PKCE OAuth (browser, captures localhost callback)"
+      echo ""
+      if [[ -f "$SCRIPTS_DIR/.asana-token.json" ]]; then
+        say "asana_ops.py: token already present — skipping (delete to re-auth)"
+      elif has_tty; then
+        read -rp "   Auth asana_ops.py now? Opens a browser. [Y/n]: " ans </dev/tty
+        ans="${ans:-Y}"
+        if [[ "${ans^^}" == "Y" ]]; then
+          if [[ $DRY_RUN -eq 1 ]]; then
+            say "(dry-run) python3 '$SCRIPTS_DIR/asana_ops.py' --auth"
+          else
+            (cd "$SCRIPTS_DIR" && python3 ./asana_ops.py --auth) || \
+              warn "asana_ops.py auth failed — re-run later: python3 $SCRIPTS_DIR/asana_ops.py --auth"
+          fi
+        else
+          say "Skipped — run later: python3 $SCRIPTS_DIR/asana_ops.py --auth"
+          say "  Or paste a PAT: append ASANA_PAT=<token> to $ENV_FILE"
+        fi
+      else
+        warn "no terminal — auth later: python3 $SCRIPTS_DIR/asana_ops.py --auth"
+      fi
       ;;
     shortcut)
       setup_token SHORTCUT_API_TOKEN "https://app.shortcut.com/settings/account/api-tokens"
+      ;;
+    linear|jira)
+      say "$sys: MCP OAuth happens on first use inside Claude Code — nothing to set up here"
       ;;
   esac
 done
@@ -328,13 +348,19 @@ echo "Next:"
 for sys in "${SYSTEMS[@]}"; do
   case "$sys" in
     asana)
-      echo "  • First Asana operation will open a browser for OAuth — that's expected."
+      echo "  • Asana MCP plugin: first MCP operation in Claude Code will open the browser for OAuth"
       ;;
-    shortcut|linear|jira)
-      echo "  • $sys: complete the MCP/plugin auth shown in step 5 before first use."
+    linear)
+      echo "  • Linear MCP: first MCP operation in Claude Code will prompt for OAuth"
+      ;;
+    jira)
+      echo "  • Jira (Atlassian Rovo) MCP: first MCP operation in Claude Code will prompt for OAuth"
+      ;;
+    shortcut)
+      echo "  • Shortcut: token in $ENV_FILE is used by the script — no further setup"
       ;;
   esac
 done
-echo "  • Open Claude Code in any directory and try: 'add a ticket about X to <project>'"
-echo "  • Re-run this installer after pulling updates: bash install.sh"
+echo "  • Open Claude Code and try: 'add a ticket about X to <project>'"
+echo "  • Re-run anytime to update: curl -sSL https://raw.githubusercontent.com/fractionwork/pm-skills/main/install.sh | bash"
 echo ""
