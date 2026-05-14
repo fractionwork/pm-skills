@@ -9,6 +9,7 @@ A small bundle of Claude Code skills + scripts for managing PM cards on Asana, S
 | `add-card` skill | Create a new card with all Fraction hygiene rules applied at creation time (sections, fields, parent EPIC, source attribution, duplicate detection) |
 | `add-comment` skill | Post a comment on a card; converts Markdown to each system's accepted format (Asana's HTML allowlist is enforced — no more silent 400s) |
 | `card-done` skill | Close a card with a summary comment; supports both dev-flavored and PM-flavored manual closeouts |
+| `asana-bootstrap` skill | Create a new Asana project born compliant — required admins, 6 standard custom fields, 8 standard sections (INBOX → DONE), initial Release enum, optional EPIC scaffold. The creation-time inverse of `asana-hygiene` |
 | `asana-hygiene` skill | Audit + fix an Asana project; duplicate-pair detection included |
 | `shortcut-hygiene` skill | Same for Shortcut |
 | `asana_ops.py` | REST helper for Asana operations the MCP can't do (sections, custom fields, portfolios, comment posting) |
@@ -78,6 +79,7 @@ In any Claude Code session, just describe what you want:
 - "comment on card 1234 — tag @Jane and ask for confirmation on the rollout date"
 - "close ELEVAT3-87, summary: rolled out 2026-05-08, no incidents"
 - "audit the ELEVAT3 project for hygiene issues"
+- "create a new Asana board for the Sunset migration using our standards"
 
 The right skill loads automatically based on what you said.
 
