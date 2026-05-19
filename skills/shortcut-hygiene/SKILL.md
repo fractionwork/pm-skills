@@ -16,6 +16,9 @@ description: >
   board", "standardize shortcut", "shortcut hygiene", "enrich shortcut
   backlog".
 seed_managed: true
+requires_tools: [python3]
+requires_files: [scripts/shortcut_ops.py]
+requires_mcp: [shortcut]
 ---
 
 # Shortcut Hygiene

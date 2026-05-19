@@ -14,6 +14,7 @@ description: >
   use for bulk imports (use enrichment in asana-hygiene Step 7) or for
   new project setup (use bootstrap).
 seed_managed: true
+requires_mcp_any_of: [asana, shortcut, linear]
 ---
 
 # Add Card

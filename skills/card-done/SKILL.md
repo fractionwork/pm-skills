@@ -6,6 +6,8 @@ description: >
   feedback, and clears the work context. Triggers on "merged", "PR approved",
   "done with this card", "card done", "close this card", "task complete".
 seed_managed: true
+requires_tools: [gh]
+requires_mcp_any_of: [asana, shortcut, linear]
 ---
 
 # Card Done

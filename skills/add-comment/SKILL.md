@@ -14,6 +14,7 @@ description: >
   edit path), or for bulk commenting (loop this skill, but mute
   notifications per the bulk rule).
 seed_managed: true
+requires_mcp_any_of: [asana, shortcut, linear]
 ---
 
 # Add Comment

@@ -17,6 +17,9 @@ description: >
   for adding cards to an existing project (use `add-card`), or for fixing
   an already-created project (use `asana-hygiene`).
 seed_managed: true
+requires_tools: [python3]
+requires_files: [scripts/asana_ops.py]
+requires_mcp: [asana]
 ---
 
 # Asana Bootstrap

@@ -14,6 +14,9 @@ description: >
   "standardize project", "asana hygiene", "enrich backlog", or any request
   to bring an Asana project into compliance.
 seed_managed: true
+requires_tools: [python3]
+requires_files: [scripts/asana_ops.py]
+requires_mcp: [asana]
 ---
 
 # Asana Hygiene
