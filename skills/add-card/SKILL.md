@@ -39,9 +39,13 @@ The default is **BACKLOG**. Override to **INBOX** when the request signals an un
 | "PM mentioned", "we might want to", "idea:", "haven't discussed yet" | **INBOX** |
 | "stakeholders haven't seen this", "before we commit", "noodle on this" | **INBOX** |
 | "track this thought", "park this", "future consideration" | **INBOX** |
+| Tech-debt / latent risk discovered in code review, refactor, or audit — no stakeholder has weighed in | **INBOX** |
+| User said "no urgency", "low priority", "when we have time", "future" | **INBOX** |
 | Ambiguous | **Ask once**: "Has this been discussed with stakeholders, or is this a pre-discussion idea?" |
 
 When in doubt, ask. The cost of putting an idea in INBOX is zero; the cost of putting an unvalidated idea in BACKLOG is that it pollutes sprint-planning views.
+
+**Common trap — separate "fix-clarity" from "validation."** An agent reviewing code can identify a tidy fix path (env-var rename, dead-code removal, schema migration) in 30 seconds. That makes the BACKLOG slot feel right because every field is fill-able. But the question for the section choice is *who decided this work should happen*, not *can the work be specified*. Tech-debt and latent-risk discoveries should land in INBOX even when the fix is fully scoped — until a stakeholder (PM, lead, operator) signs off that it's worth prioritizing.
 
 ## Step 2.5: Duplicate check (mandatory)
 
