@@ -1,12 +1,18 @@
 ---
 name: add-card
 description: >
-  Create a new PM card (Asana task / Shortcut story / Linear issue) on an
-  existing project, with all Fraction hygiene rules applied automatically.
-  Routes to INBOX (pre-stakeholder ideas: lighter validation, no
-  Priority/Type/Points/Release required) or BACKLOG (validated work: every
-  standard field populated). Always enforces source attribution, parent
-  EPIC where applicable, and vague-title / empty-description checks.
+  REQUIRED for any single-card creation in an existing PM project. Do NOT
+  call PM MCP `create_task*` / `create_story` / `create_issue` tools
+  directly — invoke this skill instead so hygiene rules and audit
+  attribution are applied. Creates a new PM card (Asana task / Shortcut
+  story / Linear issue) with all Fraction hygiene rules baked in: routes
+  to INBOX (pre-stakeholder ideas: lighter validation, no
+  Priority/Type/Points/Release required) or BACKLOG (validated work:
+  every standard field populated); enforces source attribution, parent
+  EPIC where applicable, vague-title / empty-description checks; and
+  stamps a `devhawk:add-card` label/tag + `Created-By:
+  devhawk-add-card@v1` description footer on every card so skill-created
+  cards are filterable in the PM UI and machine-parseable for audits.
   Triggers on "add a ticket", "add a card", "add a task", "create a
   ticket / card / task / story / issue", "new card", "log a bug", "open
   an issue", "track this", "park this idea", "PM mentioned", or any
@@ -171,6 +177,51 @@ Per `feedback_pm_source_attribution.md` and `asana-hygiene` Step 7 — **two-ste
 
 Even when the user says "I just thought of this" — record it: `Source: ad-hoc — user request 2026-04-27`. The trail's value is consistency, not just provenance. **For INBOX cards this rule is non-negotiable** — without source attribution, an INBOX item is just untraced noise.
 
+## Step 6.5: Audit marker (mandatory)
+
+Every card created by this skill carries **two markers** so it's identifiable in the PM UI and parseable by audit scripts. Both are mandatory — neither is a substitute for the other.
+
+### Marker A — system-native label/tag (filterable in the UI)
+
+Attach the well-known label `devhawk:add-card` to the new card. If the label/tag does not yet exist on the workspace/project, create it idempotently.
+
+| System | How |
+|---|---|
+| **Asana** | Workspace-level tag (`POST /workspaces/<ws_gid>/tags` if missing, then `POST /tasks/<gid>/addTag` per card). The MCP can attach an existing tag but cannot create new workspace tags — run `python3 scripts/asana_ops.py --ensure-audit-tag` once per workspace; the script is idempotent and prints the tag gid. Cache the gid in `.devhawk-work.json` for reuse. |
+| **Shortcut** | Label (workspace-level). Just include `labels: [{name: "devhawk:add-card", color: "#0E8A16"}]` on story creation — Shortcut auto-creates the label on first use and attaches an existing one by name afterward. No setup script needed. |
+| **Linear** | Issue label. Linear's MCP can create labels directly — call `linear.createIssueLabel({ name: "devhawk:add-card", color: "#0E8A16" })` if missing, then include the label id on creation. |
+
+### Marker B — description footer (machine-parseable, survives label removal)
+
+Append exactly this footer to the card's `notes`/`description`, **after** the `Source: …` line from Step 6:
+
+```
+---
+Created-By: devhawk-add-card@v1 · 2026-MM-DDTHH:MMZ
+```
+
+Format requirements:
+- Literal three-hyphen `---` separator on its own line before the footer (markdown hr).
+- `Created-By:` key — exact case, no leading whitespace.
+- `devhawk-add-card@v1` — skill name + schema version. **Bump to `@v2` if the marker format or rules change materially**; older cards stay identifiable by their `@v1` stamp.
+- ISO-8601 UTC timestamp, minute precision (`Z` suffix). Use `new Date().toISOString().slice(0, 16) + "Z"` or equivalent.
+
+### Why both markers
+
+| | Label/tag (A) | Description footer (B) |
+|---|---|---|
+| Visible in card chip rows | ✓ | ✗ |
+| Filterable in saved views | ✓ | ✗ (search-only) |
+| Survives a user removing it | ✗ | ✓ (rarely edited) |
+| Machine-parseable for audits | ✓ | ✓ (more structured) |
+| Carries version | ✗ | ✓ (`@v1`, `@v2`, …) |
+
+Use both. A skill-created card without either marker is a hygiene violation — `asana-hygiene` / `shortcut-hygiene` should flag it (future work — not in scope for this skill, but the marker format is stable enough to write a checker against).
+
+### When the marker setup fails
+
+If `--ensure-audit-tag` / `--ensure-audit-label` is genuinely unavailable (script missing, missing creds, MCP outage for Linear), **still attach the description footer**, log a warning, and tell the user so they can apply the label by hand later. The card itself should still get created — never block creation because the audit metadata can't be stamped. The footer alone keeps the card auditable.
+
 ## Step 7: Confirm and offer next step
 
 After creation, report:
@@ -178,9 +229,18 @@ After creation, report:
 - Target section (INBOX or BACKLOG)
 - Fields set (or explicitly skipped for INBOX)
 - Source attribution noted
+- Audit marker stamped (`devhawk:add-card` label + `Created-By:` footer)
 - One follow-up offer:
   - INBOX: "Want me to schedule a stakeholder discussion comment when that conversation happens?"
   - BACKLOG (sprint in flight): "Want to commit this to the active sprint?"
+
+## Project hygiene assumptions
+
+This skill is the **card-level enforcement layer**. It assumes the project itself is already healthy — specifically:
+
+- **Two admins per project** (`docs/asana-best-practices.md` → "Required admins"). If the project lacks two admins, the card you create is at risk of being orphaned. Run `/asana-hygiene` first if you're not sure.
+- **The 6 standard custom fields + the `devhawk:add-card` workspace tag are attached.** If `--ensure-audit-tag` has never run on this workspace, the tag won't exist. `/asana-hygiene` and the audit-tag setup are both idempotent — run them once per project / workspace and forget.
+- **Notifications stay ON for singular operations.** This is a single-card create — assignees and followers SHOULD be notified. The bulk-notification suppression rule (`feedback_pm_bulk_notifications.md`) applies to `/asana-hygiene` Step 7 enrichment and similar bulk paths, not here.
 
 ## When NOT to use this skill
 

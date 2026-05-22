@@ -903,6 +903,44 @@ EXISTING_FIELDS = {
     "Task Progress": "1204575864766299",
 }
 RELEASE_FIELD_GID = "1214267151463854"
+
+# Audit tag: stamped on every card created by the `add-card` skill so
+# skill-created vs manually-created cards are distinguishable in saved
+# views + machine-parseable for audit scripts.
+ADD_CARD_AUDIT_TAG_NAME = "devhawk:add-card"
+
+
+def ensure_audit_tag(dry_run=False):
+    """Idempotent: ensure the workspace-level audit tag exists. Returns its gid.
+
+    Asana tags are workspace-scoped (not project-scoped), so this is a one-shot
+    per workspace. Safe to re-run — finds the existing tag and prints its gid
+    without creating a duplicate.
+    """
+    me = api("GET", "/users/me", params={"opt_fields": "workspaces.gid"})
+    if not me:
+        print("Auth failed. Run --auth or set ASANA_PAT.", file=sys.stderr)
+        sys.exit(1)
+    ws_gid = me["data"]["workspaces"][0]["gid"]
+
+    # Look for an existing tag with the canonical name. The workspace tags
+    # endpoint paginates; we accept up to a few hundred tags before giving up.
+    for tag in paginate(f"/workspaces/{ws_gid}/tags", opt_fields="name"):
+        if tag.get("name") == ADD_CARD_AUDIT_TAG_NAME:
+            print(tag["gid"])
+            return tag["gid"]
+
+    if dry_run:
+        print(f"DRY RUN: would create tag '{ADD_CARD_AUDIT_TAG_NAME}' in workspace {ws_gid}", file=sys.stderr)
+        return None
+
+    resp = api("POST", f"/workspaces/{ws_gid}/tags", {"name": ADD_CARD_AUDIT_TAG_NAME})
+    if not resp:
+        print(f"FAILED to create tag '{ADD_CARD_AUDIT_TAG_NAME}'", file=sys.stderr)
+        sys.exit(1)
+    tag_gid = resp["data"]["gid"]
+    print(tag_gid)
+    return tag_gid
 RELEASE_OPTIONS = {
     "Phase 1": "1214267151463855",
     "Phase 2": "1214267151463856",
@@ -1241,6 +1279,7 @@ def main():
     parser.add_argument("--add-sprint-option", metavar="SPRINT_NAME", help="Add a new enum option to the Sprint custom field (convention: 'Sprint M/D-M/D')")
     parser.add_argument("--add-subtasks-to-project", metavar="TASK_GID", help="Add all direct subtasks of TASK_GID to the parent's projects (recovery for the 'parent doesn't auto-project subtasks' Asana gotcha)")
     parser.add_argument("--post-comment", nargs="+", metavar="TASK_GID", help="Post a comment on a task. Pass HTML as the second arg, or '-' to read HTML from stdin. Example: --post-comment 1234 '<body><p>hello</p></body>' or echo '<body>...</body>' | --post-comment 1234 -")
+    parser.add_argument("--ensure-audit-tag", action="store_true", help=f"Idempotent: ensure the workspace-level '{ADD_CARD_AUDIT_TAG_NAME}' tag exists; prints its gid. Used by the add-card skill to stamp skill-created cards.")
     parser.add_argument("--track", choices=["A", "B", "C", "D", "E", "all"])
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--borderline", nargs="*", help="GIDs of borderline projects (Track A)")
@@ -1310,6 +1349,10 @@ def main():
         else:
             print("FAILED")
             sys.exit(1)
+        return
+
+    if args.ensure_audit_tag:
+        ensure_audit_tag(args.dry_run)
         return
 
     if args.hygiene:
