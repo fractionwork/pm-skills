@@ -290,7 +290,11 @@ for sys in "${SYSTEMS[@]}"; do
       elif has_tty; then
         read -rp "   Auth asana_ops.py now? Opens a browser. [Y/n]: " ans </dev/tty
         ans="${ans:-Y}"
-        if [[ "${ans^^}" == "Y" ]]; then
+        # Pattern match instead of `${ans^^}` — macOS ships bash 3.2 by default
+        # (GPLv3 keeps Apple from updating it), and `^^` is bash 4+ only. Without
+        # this, the prompt always took the "skip" branch on Mac, leaving every
+        # macOS user un-auth'd against Asana with no clear error trail.
+        if [[ "$ans" == [Yy] ]]; then
           if [[ $DRY_RUN -eq 1 ]]; then
             say "(dry-run) python3 '$SCRIPTS_DIR/asana_ops.py' --auth"
           else
