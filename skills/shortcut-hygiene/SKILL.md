@@ -1,19 +1,13 @@
 ---
 name: shortcut-hygiene
 description: >
-  Audit and fix a Shortcut project against Fraction best practices. Checks for
-  missing Priority custom field, stories without estimates/owners/types, missing
-  epics, vague titles, empty descriptions, workflow state coverage, and stale
-  Inbox stories (>30 days). Field-strict checks (estimate / type / Priority /
-  epic / Iteration) skip Inbox stories — those are deferred until Inbox →
-  Unscheduled promotion. The owner check skips Inbox AND Unscheduled — both
-  are intentionally unassigned per the three-tier rule (ownership lands at
-  sprint planning when a story moves to Started+). Reports gaps with story name + permalink
-  under each non-zero category and offers fixes. Can also enrich the backlog
-  from meeting transcripts, emails, and chat. **Always enforces all best
-  practices by default** — only skip checks if the user explicitly opts out.
-  Triggers on "clean up shortcut", "audit shortcut project", "fix shortcut
-  board", "standardize shortcut", "shortcut hygiene", "enrich shortcut
+  Audit and fix a Shortcut project against Fraction best practices — missing
+  Priority field, stories without estimates/owners/types, missing epics, vague
+  titles, empty descriptions, workflow coverage, stale Inbox stories. Reports
+  gaps with story name + permalink and offers fixes; can also enrich the backlog
+  from transcripts/emails/chat. Enforces all checks by default unless the user
+  opts out. Triggers on "clean up shortcut", "audit shortcut project", "fix
+  shortcut board", "standardize shortcut", "shortcut hygiene", "enrich shortcut
   backlog".
 seed_managed: true
 requires_tools: [python3]
@@ -23,7 +17,7 @@ requires_mcp: [shortcut]
 
 # Shortcut Hygiene
 
-Audit a Shortcut project against `@docs/shortcut-best-practices.md` and fix gaps.
+Audit a Shortcut project against `docs/shortcut-best-practices.md` and fix gaps.
 
 Uses Shortcut MCP for reads where available. Uses `scripts/shortcut_ops.py` (REST API) for custom field creation and bulk operations. Auth: `SHORTCUT_API_TOKEN` env var.
 
@@ -38,7 +32,7 @@ AskUserQuestion — header: "Project", question: "Which Shortcut project to audi
 
 ## Step 2: Audit
 
-Field-strict checks (estimate / story_type / Priority / epic / Iteration) **skip stories in the Inbox workflow state** — those gaps get filled at the Inbox → Unscheduled promotion conversation, not before. The **owner check is stricter** — it skips Inbox AND Unscheduled (the BACKLOG-equivalent), only flagging Started+ stories without an owner. Title / description / source-attribution checks still apply to Inbox. See @docs/shortcut-best-practices.md for the per-state field requirement table.
+Field-strict checks (estimate / story_type / Priority / epic / Iteration) **skip stories in the Inbox workflow state** — those gaps get filled at the Inbox → Unscheduled promotion conversation, not before. The **owner check is stricter** — it skips Inbox AND Unscheduled (the BACKLOG-equivalent), only flagging Started+ stories without an owner. Title / description / source-attribution checks still apply to Inbox. See docs/shortcut-best-practices.md for the per-state field requirement table.
 
 ### 2.1 Priority custom field
 Check if a workspace-level "Priority" enum field exists with P0-P3 values.
@@ -143,7 +137,7 @@ Shortcut uses workflow states instead of Asana sections. The mapping:
 | Ready for Deploy | `started` | READY FOR RELEASE |
 | Completed | `done` | DONE |
 
-New work from external source enrichment (Step 6) goes to **Unscheduled** by default. Pre-stakeholder ideas (`add-card` skill triggers like "PM mentioned", "we might want to") land in **Inbox**. Stories move from Inbox → Unscheduled only after a stakeholder discussion comment is logged (the same promotion-gate rule as Asana — see `@docs/asana-best-practices.md`). Stories move from Unscheduled → Ready for Development after refinement (description, estimate, priority, acceptance criteria).
+New work from external source enrichment (Step 6) goes to **Unscheduled** by default. Pre-stakeholder ideas (`add-card` skill triggers like "PM mentioned", "we might want to") land in **Inbox**. Stories move from Inbox → Unscheduled only after a stakeholder discussion comment is logged (the same promotion-gate rule as Asana — see `docs/asana-best-practices.md`). Stories move from Unscheduled → Ready for Development after refinement (description, estimate, priority, acceptance criteria).
 
 If the project's Shortcut workflow doesn't have an "Inbox" state, add one as the first `unstarted` state — that's the structural prerequisite for the whole pre-backlog flow. Field-strict checks in shortcut-hygiene (estimate / story_type / priority) skip Inbox stories, the same way asana-hygiene skips INBOX section items.
 

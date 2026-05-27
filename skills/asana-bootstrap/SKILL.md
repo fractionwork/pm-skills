@@ -1,21 +1,14 @@
 ---
 name: asana-bootstrap
 description: >
-  Create a new Asana project (board) with all Fraction standards applied at
-  creation time — required admins, 6 standard custom fields (Priority, Task
-  Type, Story Points, Task Progress, Release, Sprint), 8 standard sections
-  (INBOX → DONE), project metadata (notes, start_on, due_on), an initial
-  Release/Phase enum option, and an optional initial EPIC scaffold. This is
-  the creation-time inverse of `asana-hygiene` — same rule set, applied
-  up-front so the board is born clean instead of audited later. Always
-  enforces best practices by default; only skip if the user explicitly opts
-  out. Triggers on "create a board in Asana", "create an Asana project",
-  "set up an Asana board", "new Asana project", "bootstrap Asana", "spin up
-  a project in Asana using our standards / best practice", or any request
-  to create a single Asana project from scratch. Do NOT use for full
-  DevHawk product bootstrap (code + repo + Asana + DO — use `bootstrap`),
-  for adding cards to an existing project (use `add-card`), or for fixing
-  an already-created project (use `asana-hygiene`).
+  Create a new Asana project with all Fraction standards applied at creation
+  time — required admins, the 6 standard custom fields, the 8 standard sections
+  (INBOX→DONE), project metadata, an initial Release option, and optional EPIC
+  scaffold. Creation-time inverse of `asana-hygiene` (same rules, applied
+  up-front). Triggers on "create an Asana project/board", "set up an Asana
+  board", "new Asana project", "bootstrap Asana", "spin up a project in Asana
+  using our standards". NOT for full DevHawk bootstrap (use `bootstrap`), adding
+  cards (use `add-card`), or fixing an existing project (use `asana-hygiene`).
 seed_managed: true
 requires_tools: [python3]
 requires_files: [scripts/asana_ops.py]
@@ -24,9 +17,9 @@ requires_mcp: [asana]
 
 # Asana Bootstrap
 
-Stand up a new Asana project that's already compliant with `@docs/asana-best-practices.md` — no follow-up hygiene pass required.
+Stand up a new Asana project that's already compliant with `docs/asana-best-practices.md` — no follow-up hygiene pass required.
 
-The canonical rules live in `@docs/asana-best-practices.md` and `@.claude/skills/asana-hygiene/SKILL.md`. This skill is the **creation-time enforcement layer for whole projects** — it doesn't duplicate the rules, it sequences the calls that apply them.
+The canonical rules live in `docs/asana-best-practices.md` and `.claude/skills/asana-hygiene/SKILL.md`. This skill is the **creation-time enforcement layer for whole projects** — it doesn't duplicate the rules, it sequences the calls that apply them.
 
 ## Step 1: Gather inputs (ask once, batched)
 
@@ -101,9 +94,9 @@ Run hygiene against the freshly-created project. It's idempotent and front-loads
 python3 scripts/asana_ops.py --hygiene <PROJECT_GID>
 ```
 
-What this attaches (per `@.claude/skills/asana-hygiene/SKILL.md` Step 2):
+What this attaches (per `.claude/skills/asana-hygiene/SKILL.md` Step 2):
 
-- **Admins:** Jeremy + Alyssia (required per `@docs/asana-best-practices.md` → "Required admins").
+- **Admins:** Jeremy + Alyssia (required per `docs/asana-best-practices.md` → "Required admins").
 - **6 standard custom fields:** Fraction Priority · Fraction Task Type · Story Points · Task Progress · Release · Sprint.
 - **8 standard sections:** INBOX · BACKLOG · TODO · IN PROGRESS · IN REVIEW · READY FOR TESTING · DONE · Ready for Release.
 
@@ -166,7 +159,7 @@ For stories under each EPIC, defer to `add-card` (or batch via `asana-hygiene` S
 
 ## Step 7: Assign to portfolio / cost-attribution (if applicable)
 
-If the workspace uses portfolios for product or client grouping (Fraction convention per `@docs/asana-best-practices.md` → "Portfolio organization"), add the new project:
+If the workspace uses portfolios for product or client grouping (Fraction convention per `docs/asana-best-practices.md` → "Portfolio organization"), add the new project:
 
 ```bash
 # Asana MCP can do this in one call:

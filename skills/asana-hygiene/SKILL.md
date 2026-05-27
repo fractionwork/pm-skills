@@ -1,18 +1,14 @@
 ---
 name: asana-hygiene
 description: >
-  Audit and fix an Asana project against Fraction best practices. Checks for
-  missing custom fields (including Release enum), orphaned tasks, incomplete
-  metadata, missing admins, unestimated stories, missing release tags, vague
-  titles, empty descriptions, non-standard sections, and stale INBOX items
-  (>30 days). Field-strict checks (Priority/Type/Points/Release) skip INBOX —
-  those are deferred until INBOX → BACKLOG promotion. Fixes issues
-  automatically and reports what needs manual attention. Can also enrich the
-  backlog from meeting transcripts, emails, and chat. **Always enforces all
-  best practices by default** — only skip checks if the user explicitly opts
-  out. Triggers on "clean up asana", "audit project", "fix asana board",
-  "standardize project", "asana hygiene", "enrich backlog", or any request
-  to bring an Asana project into compliance.
+  Audit and fix an Asana project against Fraction best practices — missing custom
+  fields (incl. Release enum), orphaned tasks, incomplete metadata, missing
+  admins, unestimated stories, vague titles, empty descriptions, non-standard
+  sections, stale INBOX items. Fixes automatically, reports what needs manual
+  attention; can enrich the backlog from transcripts/emails/chat. Enforces all
+  checks by default unless the user opts out. Triggers on "clean up asana",
+  "audit project", "fix asana board", "standardize project", "asana hygiene",
+  "enrich backlog".
 seed_managed: true
 requires_tools: [python3]
 requires_files: [scripts/asana_ops.py]
@@ -21,7 +17,7 @@ requires_mcp: [asana]
 
 # Asana Hygiene
 
-Audit and fix an Asana project against `@docs/asana-best-practices.md`.
+Audit and fix an Asana project against `docs/asana-best-practices.md`.
 
 Uses `scripts/asana_ops.py` for all operations. The script handles auth (auto-runs OAuth if needed) and provides reusable commands.
 

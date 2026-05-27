@@ -1,24 +1,15 @@
 ---
 name: add-card
 description: >
-  REQUIRED for any single-card creation in an existing PM project. Do NOT
-  call PM MCP `create_task*` / `create_story` / `create_issue` tools
-  directly — invoke this skill instead so hygiene rules and audit
-  attribution are applied. Creates a new PM card (Asana task / Shortcut
-  story / Linear issue) with all Fraction hygiene rules baked in: routes
-  to INBOX (pre-stakeholder ideas: lighter validation, no
-  Priority/Type/Points/Release required) or BACKLOG (validated work:
-  every standard field populated); enforces source attribution, parent
-  EPIC where applicable, vague-title / empty-description checks; and
-  stamps a `devhawk:add-card` label/tag + `Created-By:
-  devhawk-add-card@v1` description footer on every card so skill-created
-  cards are filterable in the PM UI and machine-parseable for audits.
-  Triggers on "add a ticket", "add a card", "add a task", "create a
-  ticket / card / task / story / issue", "new card", "log a bug", "open
-  an issue", "track this", "park this idea", "PM mentioned", or any
-  request to create a single PM artifact in an existing project. Do NOT
-  use for bulk imports (use enrichment in asana-hygiene Step 7) or for
-  new project setup (use bootstrap).
+  REQUIRED for any single-card creation in an existing PM project — do NOT call
+  PM MCP `create_task*` / `create_story` / `create_issue` directly; invoke this
+  so hygiene rules and audit attribution are applied. Creates one Asana/Shortcut/
+  Linear card routed to INBOX (pre-stakeholder idea) or BACKLOG (validated work),
+  with source attribution, parent EPIC, standard fields, and a filterable
+  `devhawk:add-card` marker. Triggers on "add a ticket/card/task/story/issue",
+  "new card", "log a bug", "open an issue", "track this", "park this idea",
+  "PM mentioned". NOT for bulk imports (use asana-hygiene Step 7) or new-project
+  setup (use bootstrap).
 seed_managed: true
 requires_mcp_any_of: [asana, shortcut, linear]
 ---
@@ -27,7 +18,7 @@ requires_mcp_any_of: [asana, shortcut, linear]
 
 Create a single PM card with all hygiene rules baked in. Mirror of how `asana-hygiene` would back-fill — but at *creation time* so the card is born clean.
 
-The canonical hygiene rules live in `@docs/asana-best-practices.md` and `@.claude/skills/asana-hygiene/SKILL.md`. This skill is the **creation-time enforcement layer** — don't duplicate the rules here, reference them.
+The canonical hygiene rules live in `docs/asana-best-practices.md` and `.claude/skills/asana-hygiene/SKILL.md`. This skill is the **creation-time enforcement layer** — don't duplicate the rules here, reference them.
 
 ## Step 1: Resolve the target project
 
@@ -37,7 +28,7 @@ If the user is ambiguous ("add a ticket about X"), check `.devhawk-work.json` fo
 
 ## Step 2: Decide target section — INBOX or BACKLOG
 
-The default is **BACKLOG**. Override to **INBOX** when the request signals an unvalidated idea — something that hasn't been discussed with stakeholders yet. See `@docs/asana-best-practices.md` for the full flow.
+The default is **BACKLOG**. Override to **INBOX** when the request signals an unvalidated idea — something that hasn't been discussed with stakeholders yet. See `docs/asana-best-practices.md` for the full flow.
 
 | Phrase / signal | Target section |
 |---|---|
@@ -142,7 +133,7 @@ If any required check fails, ask the user for the missing info before creating.
 
 ## Step 4: Populate fields
 
-For **Asana** (6 standard custom fields per `@docs/asana-best-practices.md`):
+For **Asana** (6 standard custom fields per `docs/asana-best-practices.md`):
 
 | Field | INBOX default | BACKLOG default | When to ask |
 |---|---|---|---|

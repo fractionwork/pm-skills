@@ -101,7 +101,7 @@ Transition `workflow_state_id` to either Ready for Review (rare post-merge), Rea
 
 ### backlog.md
 
-Change `— WIP` to whatever the destination column header is (`— RFT` or `— DONE`). Only check acceptance criteria `- [ ] → - [x]` if the destination is DONE. See `@docs/backlog-format.md`.
+Change `— WIP` to whatever the destination column header is (`— RFT` or `— DONE`). Only check acceptance criteria `- [ ] → - [x]` if the destination is DONE. See `docs/backlog-format.md`.
 
 ## Step 6: Post summary comment on card
 
