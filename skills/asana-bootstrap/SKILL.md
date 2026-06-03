@@ -2,9 +2,9 @@
 name: asana-bootstrap
 description: >
   Create a new Asana project with all Fraction standards applied at creation
-  time — required admins, the 6 standard custom fields, the 8 standard sections
-  (INBOX→DONE), project metadata, an initial Release option, and optional EPIC
-  scaffold. Creation-time inverse of `asana-hygiene` (same rules, applied
+  time — required admins, the 8 standard custom fields (incl. Theme + Feature),
+  the 8 standard sections (INBOX→DONE), project metadata, an initial Release
+  option, and optional EPIC scaffold (top-level definition cards). Creation-time inverse of `asana-hygiene` (same rules, applied
   up-front). Triggers on "create an Asana project/board", "set up an Asana
   board", "new Asana project", "bootstrap Asana", "spin up a project in Asana
   using our standards". NOT for full DevHawk bootstrap (use `bootstrap`), adding
@@ -97,7 +97,7 @@ python3 scripts/asana_ops.py --hygiene <PROJECT_GID>
 What this attaches (per `.claude/skills/asana-hygiene/SKILL.md` Step 2):
 
 - **Admins:** Jeremy + Alyssia (required per `docs/asana-best-practices.md` → "Required admins").
-- **6 standard custom fields:** Fraction Priority · Fraction Task Type · Story Points · Task Progress · Release · Sprint.
+- **8 standard custom fields:** Fraction Priority · Fraction Task Type · Story Points · Task Progress · Release · Sprint · Theme · Feature.
 - **8 standard sections:** INBOX · BACKLOG · TODO · IN PROGRESS · IN REVIEW · READY FOR TESTING · DONE · Ready for Release.
 
 The hygiene audit at the end will report a fresh project's only "issues": missing `start_on` / `due_on` (handled in Step 5) and zero tasks (handled in Step 6 if you opt in to scaffolding). Both are expected — don't act surprised in the response.
@@ -143,19 +143,19 @@ If the user supplied a feature list, problem statement, or external source (meet
 
 ```
 Want me to scaffold initial EPICs from <source>?
-  (a) Yes — I'll create N `EPIC: <name> (Phase 1)` tasks in BACKLOG with descriptions + Source attribution.
+  (a) Yes — I'll create N top-level `EPIC: <name>` definition cards in BACKLOG with descriptions + Source attribution.
   (b) No — leave the board empty for manual planning.
-  (c) Just the EPIC titles, no stories yet — I'll create the parent tasks; stories come later via `add-card` or hygiene enrichment.
+  (c) Just the EPIC titles, no tasks yet — I'll create the definition cards; tasks come later via `add-card` or hygiene enrichment.
 ```
 
-Each EPIC follows the same rules as `add-card`:
-- Title format: `EPIC: <Name> (Phase 1)` (the parens enable Release auto-fill on child stories per `asana-hygiene` Step 5b).
+Each EPIC is a **top-level definition card** (never a parent — the flat-task policy, `docs/asana-best-practices.md` → "Task structure"). It follows the same rules as `add-card`:
+- Title format: `EPIC: <Name>` (add a `(Phase N)` suffix only to drive the card's own Release auto-fill).
 - Description: 2-3 sentences of scope + `Source: …` line.
 - Section: BACKLOG (never INBOX — EPICs are scaffolding decisions, not unvalidated ideas).
-- Task Type: `EPIC` enum option.
+- Task Type: `EPIC` enum option. **Feature** = the epic's own name (so its tasks group with it by shared Feature value).
 - Comment: post the source quote per the two-step source-attribution rule (`asana-hygiene` Step 7).
 
-For stories under each EPIC, defer to `add-card` (or batch via `asana-hygiene` Step 7 enrichment if >3 stories from one source).
+For the tasks that belong to each EPIC, defer to `add-card` (or batch via `asana-hygiene` Step 7 enrichment if >3 from one source). They are created **top-level** with `Feature = <epic name>` — not as subtasks.
 
 ## Step 7: Assign to portfolio / cost-attribution (if applicable)
 
@@ -188,7 +188,7 @@ Final report — keep it tight:
 
 Standards applied:
   ✓ Admins: Jeremy, Alyssia
-  ✓ 6 custom fields attached
+  ✓ 8 custom fields attached
   ✓ 8 standard sections
   ✓ Release option: Phase 1
   ✓ Description + Source line set

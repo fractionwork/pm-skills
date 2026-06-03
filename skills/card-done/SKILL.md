@@ -89,11 +89,11 @@ update_tasks([{ task: cardId, completed: true }])
 
 If destination is RFT, the card stays `completed: false` until QA closes it (separate flow).
 
-### Asana (subtask with parentTaskId)
+### Asana (epic rollup via the Feature field)
 
-Same move-first/verify/then-complete order. After the subtask is verified in DONE and marked complete, check sibling subtasks:
-- All siblings completed → move parent epic to DONE and mark `completed: true` (move first, verify, then complete).
-- Some siblings incomplete → comment on parent: "Subtask [title] completed. [N] of [M] subtasks remaining." Do NOT touch parent state.
+Every task is top-level (flat-task policy) — there are no subtask siblings. The epic is the task's `Feature` value. After the task is verified in DONE and marked complete, optionally roll the epic up: query the other incomplete tasks sharing the same `Feature` (`asana_search_tasks` / `asana_get_tasks` filtered by the Feature value).
+- None left incomplete → if an `EPIC`-typed definition card exists for that Feature, move it to DONE and mark `completed: true` (move first, verify, then complete).
+- Some still incomplete → comment on the EPIC definition card (if any): "[title] completed. [N] of [M] Feature tasks remaining." Do NOT touch the epic card's state.
 
 ### Shortcut
 

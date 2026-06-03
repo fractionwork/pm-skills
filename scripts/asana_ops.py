@@ -285,6 +285,60 @@ def paginate(path, params=None, opt_fields=None):
     return all_items
 
 
+# 100 MB — Asana's hard cap on a single attachment upload.
+ATTACHMENT_MAX_BYTES = 100 * 1024 * 1024
+
+
+def attach_file(task_gid, file_path, dry_run=False):
+    """Upload a local file as an attachment on a task.
+
+    POST /attachments is multipart/form-data, not JSON — the shared api()
+    helper sends JSON and would be rejected here, so this does its own
+    request and lets `requests` set the multipart boundary (never set
+    Content-Type by hand or the boundary is lost). Fills the MCP gap: the
+    Asana MCP can't upload a local file.
+    """
+    global ERRORS
+    path = Path(file_path)
+    if not path.exists() or not path.is_file():
+        print(f"  ✗ File not found: {file_path}", file=sys.stderr)
+        sys.exit(1)
+    size = path.stat().st_size
+    if size > ATTACHMENT_MAX_BYTES:
+        print(f"  ✗ {path.name} is {size} bytes — exceeds Asana's 100MB attachment limit", file=sys.stderr)
+        sys.exit(1)
+
+    if dry_run:
+        log("POST", "/attachments", "DRY-RUN")
+        print(f"  DRY RUN: would attach {path.name} ({size} bytes) to task {task_gid}")
+        return {"data": {"gid": "dry-run"}}
+
+    token = get_token()
+    with open(path, "rb") as fh:
+        resp = requests.post(
+            f"{BASE}/attachments",
+            headers={"Authorization": f"Bearer {token}"},
+            data={"parent": task_gid},
+            files={"file": (path.name, fh)},
+        )
+
+    if resp.status_code == 429:
+        retry = int(resp.headers.get("Retry-After", 30))
+        print(f"  ⏳ Rate limited, waiting {retry}s...")
+        time.sleep(retry)
+        return attach_file(task_gid, file_path, dry_run)
+
+    log("POST", "/attachments", resp.status_code)
+    if resp.status_code >= 400:
+        ERRORS += 1
+        print(f"  ✗ {resp.status_code}: {resp.text[:200]}", file=sys.stderr)
+        return None
+
+    att = resp.json().get("data", {})
+    print(f"OK gid={att.get('gid', '')} {att.get('view_url', '')}")
+    return att
+
+
 # ═══════════════════════════════════════════════════════
 # Hygiene audit + fix
 # ═══════════════════════════════════════════════════════
@@ -296,6 +350,8 @@ REQUIRED_FIELDS = {
     "1204575864766299": "Task Progress",
     "1214267151463854": "Release",
     "1205043346485340": "Sprint",
+    "1214396024164946": "Theme",    # enum — Saga / release-theme grouping
+    "1215357133051817": "Feature",  # text — the epic/feature a task supports (flat-model)
 }
 REQUIRED_ADMINS = {
     "1206452951803612": "Jeremy King",
@@ -320,6 +376,8 @@ SPRINT_FIELD_GID = "1205043346485340"  # workspace-level multi_enum
 SP_FIELD_GID = "1208941031000919"
 PRIORITY_FIELD_GID = "1214202045134883"
 TYPE_FIELD_GID = "1214202179972377"
+THEME_FIELD_GID = "1214396024164946"    # enum — Saga / release theme
+FEATURE_FIELD_GID = "1215357133051817"  # text — epic/feature this task supports
 
 
 def auto_estimate(project_gid):
@@ -455,7 +513,7 @@ def hygiene_audit(project_gid, dry_run=False):
     # 5. Task hygiene
     print("\n5. Task Hygiene")
     tasks = paginate(f"/projects/{project_gid}/tasks",
-                     opt_fields="name,completed,assignee.gid,notes,parent.gid,parent.name,custom_fields.gid,custom_fields.enum_value.gid,custom_fields.number_value,memberships.section.gid,memberships.section.name,modified_at,permalink_url")
+                     opt_fields="name,completed,assignee.gid,notes,parent.gid,parent.name,num_subtasks,custom_fields.gid,custom_fields.enum_value.gid,custom_fields.number_value,custom_fields.text_value,memberships.section.gid,memberships.section.name,modified_at,permalink_url")
     incomplete = [t for t in tasks if not t.get("completed")]
 
     # Section helpers — INBOX gets light validation (Priority/Type/Points/Release
@@ -552,33 +610,23 @@ def hygiene_audit(project_gid, dry_run=False):
         for cf in t.get("custom_fields", []))]
     print(f"   No Release (excl. INBOX): {len(no_release)}")
     if no_release and not dry_run:
-        print(f"   → Auto-detecting phase (epic name → task prefix → Phase 1 fallback)...")
-        # Build parent→phase map from EPICs with "(Phase N)" in name
+        print(f"   → Auto-detecting phase (own name → task prefix → Phase 1 fallback)...")
+        # Flat model: no parent epics to inherit from. Detect phase from the task's
+        # own "(Phase N)" suffix (e.g. an EPIC definition card) or a Jira prefix.
         phase_pattern = re.compile(r"\(Phase\s+(\d+)\)", re.IGNORECASE)
-        epic_phase = {}
-        for task in tasks:
-            m = phase_pattern.search(task.get("name", ""))
-            if m:
-                epic_phase[task["gid"]] = f"Phase {m.group(1)}"
-        # Also detect from task prefixes: SCRUM-* = Phase 1, PHAS-* = Phase 2
         scrum_re = re.compile(r"^\[SCRUM-")
         phas_re = re.compile(r"^\[PHAS-")
         fallback_count = 0
         for task in no_release:
             phase = None
-            if task["name"].startswith("EPIC:"):
-                m = phase_pattern.search(task["name"])
-                if m:
-                    phase = f"Phase {m.group(1)}"
-            else:
-                parent = task.get("parent")
-                if parent and parent.get("gid") in epic_phase:
-                    phase = epic_phase[parent["gid"]]
-                elif scrum_re.match(task["name"]):
-                    phase = "Phase 1"
-                elif phas_re.match(task["name"]):
-                    phase = "Phase 2"
-            # Greenfield fallback — no signal in name, prefix, or parent
+            m = phase_pattern.search(task["name"])
+            if m:
+                phase = f"Phase {m.group(1)}"
+            elif scrum_re.match(task["name"]):
+                phase = "Phase 1"
+            elif phas_re.match(task["name"]):
+                phase = "Phase 2"
+            # Greenfield fallback — no signal in name or prefix
             if not phase:
                 phase = "Phase 1"
                 fallback_count += 1
@@ -587,7 +635,7 @@ def hygiene_audit(project_gid, dry_run=False):
                 api("PUT", f"/tasks/{task['gid']}", {"custom_fields": {RELEASE_FIELD_GID: opt_gid}})
                 fixes += 1
         if fallback_count:
-            print(f"   ⚠ {fallback_count} task(s) defaulted to Phase 1 (no signal in name, prefix, or parent epic). Review if your project has multiple phases.")
+            print(f"   ⚠ {fallback_count} task(s) defaulted to Phase 1 (no signal in name or prefix). Review if your project has multiple phases.")
 
     # Title quality
     vague = [t for t in incomplete if _is_vague_title(t["name"])]
@@ -599,17 +647,32 @@ def hygiene_audit(project_gid, dry_run=False):
     print(f"   Empty descriptions: {len(no_desc)}")
     _print_offenders(no_desc)
 
-    # No parent EPIC (structural — surface for triage, don't auto-fix).
-    # INBOX exempt: items here may not yet have an Epic (parent only required at promotion).
-    no_epic_parent = []
-    for t in incomplete_strict:
-        if t["name"].startswith("EPIC:"):
-            continue
-        parent = t.get("parent")
-        if not parent or not parent.get("name", "").startswith("EPIC:"):
-            no_epic_parent.append(t)
-    print(f"   No parent EPIC (excl. INBOX): {len(no_epic_parent)}")
-    _print_offenders(no_epic_parent)
+    # Missing Feature (flat-model grouping — surface for triage, don't auto-fix:
+    # the epic name is a judgement call). INBOX exempt — Feature is set at promotion.
+    def feature_value(t):
+        for cf in t.get("custom_fields", []):
+            if cf.get("gid") == FEATURE_FIELD_GID:
+                return (cf.get("text_value") or "").strip()
+        return ""
+    missing_feature = [t for t in incomplete_strict
+                       if not t["name"].startswith("EPIC:") and not feature_value(t)]
+    print(f"   Missing Feature (excl. INBOX): {len(missing_feature)}")
+    _print_offenders(missing_feature)
+
+    # Subtasks present (flat-model violation — Asana can't move a subtask between
+    # board sections, so it's stuck). Two shapes: a task that still has a parent
+    # (incl. the dual state: project member AND parented), or a task that still
+    # owns subtasks. Fix with --elevate-subtasks (non-destructive). All sections.
+    still_parented = [t for t in tasks if not t.get("completed") and t.get("parent")]
+    owns_subtasks = [t for t in tasks if not t.get("completed") and t.get("num_subtasks", 0) > 0]
+    subtask_offenders = {t["gid"]: t for t in still_parented + owns_subtasks}
+    if subtask_offenders:
+        print(f"   ⚠ Subtasks present (flat-model violation): "
+              f"{len(still_parented)} still parented, {len(owns_subtasks)} still own subtasks")
+        print(f"     → Fix: python3 scripts/asana_ops.py --elevate-subtasks {project_gid}")
+        _print_offenders(list(subtask_offenders.values()))
+    else:
+        print(f"   Subtasks present (flat-model violation): 0")
 
     print(f"\n   Total fixes applied: {fixes}")
 
@@ -620,11 +683,11 @@ def hygiene_audit(project_gid, dry_run=False):
 
 
 def create_new_phase(project_gid, phase_name, dry_run=False):
-    """Create a new phase (set of Epics) in an existing project.
+    """Create a new phase (a release arc) in an existing project.
 
-    A phase is a named group of Epics within a single project. The project
-    stays the same — new Epics are added with the phase name as a suffix.
-    Example: 'EPIC: Rate Shopping (Phase 3)'
+    A phase is a named release arc within a single project. The project stays
+    the same — it adds a Release enum option and posts a status update. Tasks
+    are grouped by the Feature (epic) text field, not by parent/child nesting.
 
     This is how teams add new release phases without creating new projects.
     """
@@ -673,7 +736,7 @@ def create_new_phase(project_gid, phase_name, dry_run=False):
     api("POST", f"/projects/{project_gid}/project_statuses", {
         "color": "blue",
         "title": f"{phase_name} started",
-        "text": f"New phase '{phase_name}' created. Epics and stories will be added as discovery and planning complete.",
+        "text": f"New phase '{phase_name}' created. Features and tasks will be added as discovery and planning complete.",
     }, dry_run=dry_run)
 
     # Ensure Release enum option exists for this phase
@@ -689,11 +752,11 @@ def create_new_phase(project_gid, phase_name, dry_run=False):
 
     todo_gid = section_gids.get("TODO", "")
     print(f"\n  Phase '{phase_name}' ready.")
-    print(f"  Add Epics with: 'EPIC: [Name] ({phase_name})'")
+    print(f"  Add top-level tasks with Feature = '<epic name>' (no subtasks — flat-task policy).")
     print(f"  TODO section: {todo_gid}")
     if release_opt_gid:
         print(f"  Release option GID: {release_opt_gid} — set on new tasks")
-    print(f"\n  Next: create Epics and stories via MCP or asana_ops.py")
+    print(f"\n  Next: create top-level tasks via MCP or asana_ops.py (carry Feature/Theme)")
 
 
 # ═══════════════════════════════════════════════════════
@@ -761,6 +824,83 @@ def add_subtasks_to_project(parent_gid, dry_run=False):
         added += 1
 
     print(f"  Done. {added} added, {skipped} skipped.")
+
+
+def elevate_subtasks(project_gid, dry_run=False):
+    """Elevate every subtask in a project to a top-level task (flat-task policy).
+
+    Asana can't move a subtask between board sections, so subtasks can never
+    flow INBOX → DONE. This promotes them non-destructively (same gid, comments,
+    attachments) with a two-call sequence — order matters:
+        1. POST /tasks/{gid}/addProject {project, section}  → board-visible
+        2. POST /tasks/{gid}/setParent  {parent: null}       → detach
+    Reverse the order and the task briefly belongs to nothing. Then the former
+    parent's name is copied into each child's Feature field (and the parent's
+    Theme, if set). The parent EPIC card is KEPT (its Feature = its own name, so
+    it groups with its tasks). Idempotent — also repairs the dual state where a
+    task is a project member but still parented (step 1 ran, step 2 didn't).
+
+    Section routing for a not-yet-placed child: completed → DONE; open → the
+    parent's section if it's an active flow section (INBOX/BACKLOG/TODO/WIP),
+    else BACKLOG. A child already in a section keeps it.
+    """
+    print(f"\n═══ Elevate subtasks: {project_gid} ═══\n")
+
+    sr = api("GET", f"/projects/{project_gid}/sections", params={"opt_fields": "name"})
+    sections = {s["name"]: s["gid"] for s in sr.get("data", [])} if sr else {}
+    gid_to_name = {g: n for n, g in sections.items()}
+    done_gid = sections.get("DONE")
+    backlog_gid = sections.get("BACKLOG")
+    ACTIVE = {"INBOX", "BACKLOG", "TODO", "WIP"}
+
+    tasks = paginate(f"/projects/{project_gid}/tasks", opt_fields="name,num_subtasks")
+    parents = [t for t in tasks if t.get("num_subtasks", 0) > 0]
+    if not parents:
+        print("  No parent tasks with subtasks — project is already flat.")
+        return
+
+    elevated = 0
+    for p in parents:
+        pdata = api("GET", f"/tasks/{p['gid']}", params={
+            "opt_fields": "name,memberships.section.name,"
+                          "custom_fields.gid,custom_fields.enum_value.gid"})
+        pd = pdata["data"] if pdata else {}
+        pname = pd.get("name", p["name"])
+        psection = next((m["section"]["name"] for m in pd.get("memberships", [])
+                         if m.get("section")), None)
+        ptheme = next((cf["enum_value"]["gid"] for cf in pd.get("custom_fields", [])
+                       if cf.get("gid") == THEME_FIELD_GID and cf.get("enum_value")), None)
+        # Keep the parent EPIC card; tag its own Feature so it groups with its tasks.
+        api("PUT", f"/tasks/{p['gid']}", {"custom_fields": {FEATURE_FIELD_GID: pname}},
+            dry_run=dry_run)
+
+        subs = paginate(f"/tasks/{p['gid']}/subtasks",
+                        opt_fields="name,completed,memberships.section.name")
+        print(f"  EPIC {pname[:50]!r} [{psection or '—'}] — {len(subs)} subtask(s)")
+        for st in subs:
+            cur_sec = next((m["section"]["name"] for m in st.get("memberships", [])
+                            if m.get("section")), None)
+            if cur_sec:
+                target = sections.get(cur_sec)              # already placed — keep
+            elif st.get("completed"):
+                target = done_gid
+            elif psection in ACTIVE:
+                target = sections.get(psection)
+            else:
+                target = backlog_gid
+            target = target or backlog_gid
+            api("POST", f"/tasks/{st['gid']}/addProject",
+                {"project": project_gid, "section": target}, dry_run=dry_run)   # step 1
+            api("POST", f"/tasks/{st['gid']}/setParent",
+                {"parent": None}, dry_run=dry_run)                              # step 2
+            cf = {FEATURE_FIELD_GID: pname}
+            if ptheme:
+                cf[THEME_FIELD_GID] = ptheme
+            api("PUT", f"/tasks/{st['gid']}", {"custom_fields": cf}, dry_run=dry_run)
+            elevated += 1
+            print(f"    ✓ {st['name'][:46]!r} → {gid_to_name.get(target, target)}")
+
+    print(f"\n  Elevated {elevated} subtask(s). Parent EPIC cards kept (Feature = own name).")
 
 
 def track_a(dry_run=False, borderline_approved=None):
@@ -1277,8 +1417,11 @@ def main():
     parser.add_argument("--new-phase", nargs=2, metavar=("PROJECT_GID", "PHASE_NAME"), help="Create a new phase (Epic group) in an existing project")
     parser.add_argument("--add-release-option", metavar="PHASE_NAME", help="Add a new enum option to the Release custom field (e.g. 'Phase 5')")
     parser.add_argument("--add-sprint-option", metavar="SPRINT_NAME", help="Add a new enum option to the Sprint custom field (convention: 'Sprint M/D-M/D')")
-    parser.add_argument("--add-subtasks-to-project", metavar="TASK_GID", help="Add all direct subtasks of TASK_GID to the parent's projects (recovery for the 'parent doesn't auto-project subtasks' Asana gotcha)")
+    parser.add_argument("--add-subtasks-to-project", metavar="TASK_GID", help="[legacy] Add all direct subtasks of TASK_GID to the parent's projects WITHOUT detaching. Superseded by --elevate-subtasks under the flat-task policy.")
+    parser.add_argument("--elevate-subtasks", metavar="PROJECT_GID", help="Flat-task fix: promote every subtask in PROJECT_GID to a top-level task (addProject+section, then setParent null), copy the parent's Feature/Theme onto each child, keep the parent EPIC card. Idempotent; repairs dual state.")
+    parser.add_argument("--add-theme-option", metavar="SAGA_NAME", help="Add a new enum option (a Saga) to the Theme custom field")
     parser.add_argument("--post-comment", nargs="+", metavar="TASK_GID", help="Post a comment on a task. Pass HTML as the second arg, or '-' to read HTML from stdin. Example: --post-comment 1234 '<body><p>hello</p></body>' or echo '<body>...</body>' | --post-comment 1234 -")
+    parser.add_argument("--attach-file", nargs=2, metavar=("TASK_GID", "FILE_PATH"), help="Upload a local file as an attachment on a task (fills the MCP gap — MCP can't upload local files). Asana caps a single attachment at 100MB.")
     parser.add_argument("--ensure-audit-tag", action="store_true", help=f"Idempotent: ensure the workspace-level '{ADD_CARD_AUDIT_TAG_NAME}' tag exists; prints its gid. Used by the add-card skill to stamp skill-created cards.")
     parser.add_argument("--track", choices=["A", "B", "C", "D", "E", "all"])
     parser.add_argument("--dry-run", action="store_true")
@@ -1332,6 +1475,19 @@ def main():
         add_subtasks_to_project(args.add_subtasks_to_project, args.dry_run)
         return
 
+    if args.elevate_subtasks:
+        elevate_subtasks(args.elevate_subtasks, args.dry_run)
+        return
+
+    if args.add_theme_option:
+        resp = api("POST", f"/custom_fields/{THEME_FIELD_GID}/enum_options",
+                   {"name": args.add_theme_option, "insert_before": None})
+        if resp:
+            print(f"Created Theme option: {args.add_theme_option} → {resp['data']['gid']}")
+        else:
+            print("FAILED")
+        return
+
     if args.post_comment:
         if len(args.post_comment) < 2:
             print("Error: --post-comment requires TASK_GID and HTML (or '-' for stdin)")
@@ -1349,6 +1505,10 @@ def main():
         else:
             print("FAILED")
             sys.exit(1)
+        return
+
+    if args.attach_file:
+        attach_file(args.attach_file[0], args.attach_file[1], args.dry_run)
         return
 
     if args.ensure_audit_tag:

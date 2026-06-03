@@ -5,8 +5,8 @@ description: >
   PM MCP `create_task*` / `create_story` / `create_issue` directly; invoke this
   so hygiene rules and audit attribution are applied. Creates one Asana/Shortcut/
   Linear card routed to INBOX (pre-stakeholder idea) or BACKLOG (validated work),
-  with source attribution, parent EPIC, standard fields, and a filterable
-  `devhawk:add-card` marker. Triggers on "add a ticket/card/task/story/issue",
+  with source attribution, Feature field (the epic it supports), standard fields,
+  and a filterable `devhawk:add-card` marker. Always top-level — never a subtask. Triggers on "add a ticket/card/task/story/issue",
   "new card", "log a bug", "open an issue", "track this", "park this idea",
   "PM mentioned". NOT for bulk imports (use asana-hygiene Step 7) or new-project
   setup (use bootstrap).
@@ -19,6 +19,8 @@ requires_mcp_any_of: [asana, shortcut, linear]
 Create a single PM card with all hygiene rules baked in. Mirror of how `asana-hygiene` would back-fill — but at *creation time* so the card is born clean.
 
 The canonical hygiene rules live in `docs/asana-best-practices.md` and `.claude/skills/asana-hygiene/SKILL.md`. This skill is the **creation-time enforcement layer** — don't duplicate the rules here, reference them.
+
+> **Asana MCP fails or lacks a capability? Fall back to `scripts/asana_ops.py` — don't give up.** The script self-authenticates and hits the REST API directly, so it can do anything the MCP can plus what the MCP structurally can't (create fields/sections/tags, upload files via `--attach-file`, archive, etc.). Full command surface + fallback rule in `docs/asana-best-practices.md` → "MCP limitations and the asana_ops.py fallback".
 
 ## Step 1: Resolve the target project
 
@@ -65,7 +67,7 @@ A match is a likely dupe when **two or more** of these signals hit:
 |---|---|
 | Title token overlap | ≥50% of significant tokens shared (after lowercase + stopword strip) |
 | Substring containment | Existing title appears in new title or vice-versa (after stopword strip) |
-| Same parent EPIC | If the new card has a parent EPIC and an existing card sits under the same EPIC |
+| Same Feature | If the new card's `Feature` value matches an existing card's `Feature` (same epic) |
 | Same source | The proposed `Source: …` line points at the same meeting / email / channel / commit / PR as an existing card |
 | Same domain noun | Both reference the same primary entity (e.g. "approver dropdown", "S3 upload retry" — not generic verbs like "fix" or "update") |
 | Recency | Existing card opened within the last 14 days (older work-streams may legitimately revisit a topic) |
@@ -83,7 +85,7 @@ If one or more candidates score as likely dupes, **stop and surface them before 
    Status: <section/state> · Opened: <relative date> · Owner: <name or unassigned>
    Why it looks like a dupe:
    - <signal 1, e.g. "75% title token overlap: 'approver', 'dropdown', 'role'">
-   - <signal 2, e.g. "Same parent EPIC: ELEVAT3 → Auth & Access">
+   - <signal 2, e.g. "Same Feature: 'Auth & Access'">
    - <signal 3, e.g. "Same source: 2026-04-29 standup">
 
 2. [TITLE] (permalink)
@@ -106,7 +108,7 @@ Always quote at least one specific signal in the reasoning — vague "looks simi
    [ADDITIONAL CONTEXT 2026-MM-DD from <source>]
    <the new context the user provided — a quote, a snippet, or the original ask verbatim>
    ```
-2. If the existing card is missing fields the new context fills (description, source, parent EPIC, etc.), prompt the user to confirm a field-level update. Do NOT silently overwrite — ask first.
+2. If the existing card is missing fields the new context fills (description, source, Feature, etc.), prompt the user to confirm a field-level update. Do NOT silently overwrite — ask first.
 3. Report the updated card's permalink + what changed. Skip Steps 3–7.
 
 **(b) Add anyway** — proceed to Step 3, but in the new card's description add a `Possibly related: <permalink>` line (one per matched dupe). After creating, also append a one-line comment on each suspected dupe pointing back at the new card so the cross-link is bidirectional.
@@ -126,14 +128,14 @@ Validation scales with target section. INBOX is intentionally light — demandin
 | Title quality (not vague, no standalone TBD/TODO/misc) | required | required |
 | Description (1-2 sentences) | required | required |
 | Source attribution | **required** | required |
-| Parent EPIC identifiable | optional | required (or explicit "EPIC pending") |
-| Priority / Type / Points / Release | optional (skip — re-evaluate at promotion) | required |
+| Feature identifiable (the epic it supports) | optional | required (or explicit "Feature pending") |
+| Priority / Type / Points / Release / Theme | optional (skip — re-evaluate at promotion) | required |
 
 If any required check fails, ask the user for the missing info before creating.
 
 ## Step 4: Populate fields
 
-For **Asana** (6 standard custom fields per `docs/asana-best-practices.md`):
+For **Asana** (8 standard custom fields per `docs/asana-best-practices.md`):
 
 | Field | INBOX default | BACKLOG default | When to ask |
 |---|---|---|---|
@@ -143,6 +145,8 @@ For **Asana** (6 standard custom fields per `docs/asana-best-practices.md`):
 | Story Points | leave unset | Auto-estimate (mirror `auto_estimate()` in `scripts/asana_ops.py`): trivial=1, small=2, medium=3, large=5, complex=8 | If the user gave one explicitly |
 | Release | leave unset | Active phase. If unknown, default to `Phase 1`. For ELEVAT3 currently: `Phase 2`. | If the project has multiple active phases |
 | Sprint | none | None unless the user explicitly says "for this sprint" | Only if user mentions a sprint by name |
+| **Feature** (text) | set if known | The epic this supports — **free string**, matched to an existing `Feature` value where one fits (reuse, don't fork the spelling) | If no obvious epic → ask, or set "Feature pending" |
+| **Theme** (enum) | leave unset | The Saga / release-theme — pick an existing Theme option | If ambiguous which saga |
 | Owner / assignee | unassigned | **Leave unassigned** — owner gets set during sprint planning | Never auto-assign |
 
 INBOX cards intentionally skip Priority / Type / Points / Release — these get filled in during the INBOX → BACKLOG promotion conversation, not before.
@@ -151,13 +155,13 @@ For **Shortcut**: same logic, mapped to Shortcut primitives — workflow_state �
 
 For **Linear**: state → Backlog, priority (default Medium=3), team selected.
 
-For **INBOX cards specifically**: skip Priority / Task Type / Story Points / Release / Sprint custom-field assignments. Only set Section=INBOX, the parent EPIC if known, and the description (with Source line). Lighter creation matches the lighter pre-flight requirements.
+For **INBOX cards specifically**: skip Priority / Task Type / Story Points / Release / Sprint / Theme custom-field assignments. Only set Section=INBOX, the `Feature` if known, and the description (with Source line). Lighter creation matches the lighter pre-flight requirements.
 
 ## Step 5: Create the card
 
-Asana: `asana_create_task` with `name`, `notes`, `projects`, `memberships=[{project, section}]` (BACKLOG or INBOX), `custom_fields` (only the ones required for the target section per Step 4), `parent` (the EPIC if applicable). Sprint goes via PUT after creation since `asana_create_task` may not accept multi_enum on create.
+Asana: `asana_create_task` with `name`, `notes`, `projects`, `memberships=[{project, section}]` (BACKLOG or INBOX), `custom_fields` (only the ones required for the target section per Step 4, **including `Feature`**). Sprint goes via PUT after creation since `asana_create_task` may not accept multi_enum on create.
 
-**Subtask gotcha — must call `addProject` after create when `parent` is set.** Asana's API silently drops the `projects` / `memberships` params when `parent` is provided: the new task is parented but unprojected. Custom-field PUTs then fail with "Custom field with ID X is not on given object" (400). After `asana_create_task` with a `parent`, immediately call `POST /tasks/<new_gid>/addProject` (one call per project the parent is on) **before** setting any custom fields. The seed script `python3 scripts/asana_ops.py --add-subtasks-to-project <parent_gid>` is the idempotent recovery tool if this gets missed.
+**Always top-level — never pass `parent`.** The flat-task policy (`docs/asana-best-practices.md` → "Task structure") forbids subtasks for workflow items: Asana can't move a subtask between board sections, so it would be stuck off the board forever. The epic association is carried by the **`Feature`** field, not by nesting. If you ever need to relate a card to an epic definition card, set matching `Feature` values — do not set `parent`. (Legacy subtasks found in a project are elevated with `python3 scripts/asana_ops.py --elevate-subtasks <PROJECT_GID>`.)
 
 ## Step 6: Source attribution (mandatory)
 
@@ -230,7 +234,7 @@ After creation, report:
 This skill is the **card-level enforcement layer**. It assumes the project itself is already healthy — specifically:
 
 - **Two admins per project** (`docs/asana-best-practices.md` → "Required admins"). If the project lacks two admins, the card you create is at risk of being orphaned. Run `/asana-hygiene` first if you're not sure.
-- **The 6 standard custom fields + the `devhawk:add-card` workspace tag are attached.** If `--ensure-audit-tag` has never run on this workspace, the tag won't exist. `/asana-hygiene` and the audit-tag setup are both idempotent — run them once per project / workspace and forget.
+- **The 8 standard custom fields + the `devhawk:add-card` workspace tag are attached.** If `--ensure-audit-tag` has never run on this workspace, the tag won't exist. `/asana-hygiene` and the audit-tag setup are both idempotent — run them once per project / workspace and forget.
 - **Notifications stay ON for singular operations.** This is a single-card create — assignees and followers SHOULD be notified. The bulk-notification suppression rule (`feedback_pm_bulk_notifications.md`) applies to `/asana-hygiene` Step 7 enrichment and similar bulk paths, not here.
 
 ## When NOT to use this skill

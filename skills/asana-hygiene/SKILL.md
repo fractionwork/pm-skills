@@ -21,6 +21,8 @@ Audit and fix an Asana project against `docs/asana-best-practices.md`.
 
 Uses `scripts/asana_ops.py` for all operations. The script handles auth (auto-runs OAuth if needed) and provides reusable commands.
 
+> **Fallback rule:** if the Asana MCP is ever missing a capability, disconnected, or returns an error/empty, fall back to `scripts/asana_ops.py` before reporting that something can't be done — it talks to the REST API directly and covers everything the MCP can't (create fields/sections/portfolios/tags, archive, upload files via `--attach-file`). Full command surface in `docs/asana-best-practices.md` → "MCP limitations and the asana_ops.py fallback".
+
 ## Step 1: Pick the project
 
 Use Asana MCP to list projects, or ask the builder for the project GID/name.
@@ -33,7 +35,7 @@ python3 scripts/asana_ops.py --hygiene <PROJECT_GID>
 
 This runs the full audit and auto-fixes:
 - **Admins:** adds Jeremy + Alyssia if missing
-- **Custom fields:** attaches 6 standard fields (Priority, Task Type, Story Points, Task Progress, Release, Sprint)
+- **Custom fields:** attaches 8 standard fields (Priority, Task Type, Story Points, Task Progress, Release, Sprint, Theme, Feature)
 - **Sections:** creates missing standard sections (INBOX → DONE)
 - **Metadata:** reports missing start_on, due_on, notes (needs manual input)
 - **Priority / Task Type / Story Points / Release:** auto-fill **only for non-INBOX items** — INBOX is intentionally light (these get filled at the INBOX → BACKLOG promotion conversation, not before). Audit output labels these as "(excl. INBOX)" so the funnel stays honest.
@@ -43,7 +45,8 @@ This runs the full audit and auto-fixes:
 - **Orphaned tasks:** reports tasks with no section
 - **Vague titles:** reports "fix/update/misc" titles for manual cleanup (applies to all sections, including INBOX)
 - **Empty descriptions:** reports tasks with no description (applies to all sections — INBOX still requires a 1-2 sentence description + Source line)
-- **No parent EPIC (excl. INBOX):** reports non-EPIC tasks whose parent isn't an `EPIC:` task — INBOX exempt
+- **Missing Feature (excl. INBOX):** reports non-EPIC tasks with no `Feature` value — INBOX exempt (Feature is set at the INBOX → BACKLOG promotion)
+- **Subtasks present (flat-model violation):** reports any task that still has a parent, or still owns subtasks. Asana can't move a subtask between board sections, so these are stuck. Fix with `python3 scripts/asana_ops.py --elevate-subtasks <PROJECT_GID>` (non-destructive — see `docs/asana-best-practices.md` → "Subtask elevation"). Also catches the dual state (member of a project *and* still parented).
 - **Non-standard sections:** reports any sections beyond the 8 standards (INBOX → DONE)
 
 ## Step 3: Manual follow-up
@@ -108,7 +111,7 @@ When you mute, **say so in the response** so the user can adjust if they wanted 
 The flow has three pre-WIP stages, each with a different bar:
 
 - **INBOX** — raw requirements not yet discussed with stakeholders. Title + description + Source line are required; Priority / Type / Points / Release are deliberately deferred. The `add-card` skill routes "PM mentioned", "we might want to", "haven't discussed yet"-style requests here.
-- **BACKLOG** — stakeholder buy-in confirmed. All 6 standard custom fields populated. Owner unassigned.
+- **BACKLOG** — stakeholder buy-in confirmed. Standard custom fields populated (incl. Theme + Feature). Owner unassigned.
 - **TODO** — pulled into the active sprint. Estimated, owned, ready to start.
 
 **Promotion gate**: moving a task out of INBOX requires a stakeholder discussion comment on the card recording the conversation that validated it. Format: `Stakeholder discussion YYYY-MM-DD with @<person> — accepted as scoped. <one-line outcome>`. This extends the Step 7 source-attribution rule into a workflow gate. If stakeholders rejected the item, close it (don't move to BACKLOG); the discussion comment + closed status is the audit trail.
@@ -129,7 +132,7 @@ External-source enrichment (meetings/emails/chat) lands in BACKLOG by default �
 
 The Release enum field (`1214267151463854`) tracks which phase/release a task belongs to. Hygiene auto-populates it:
 
-1. **From epic parent names:** if a task's parent epic contains "(Phase N)", set Release = "Phase N"
+1. **From an EPIC definition card's own name:** if an `EPIC`-typed card contains "(Phase N)", set its Release = "Phase N". (There are no parent epics in the flat model — the old "child inherits from parent" path is gone; propagate by shared `Feature` instead.)
 2. **From task prefixes:** `[SCRUM-*]` = Phase 1, `[PHAS-*]` = Phase 2 (Jira migration convention)
 3. **From the `create_new_phase` function:** new phases auto-create a Release enum option and tag all tasks
 4. **Manual:** builder can set Release directly on any task
@@ -161,7 +164,7 @@ The Sprint **multi_enum** field (`1205043346485340`) tracks time-boxed iteration
 Beyond the automated checks, review:
 - **Stale tasks:** incomplete tasks created >90 days ago with no updates. Ask: "Still relevant or should we archive?"
 - **Missing acceptance criteria:** stories with descriptions but no checklist of what "done" looks like. Propose criteria from the description.
-- **Epic balance:** are all stories stuffed in one epic? Propose splitting.
+- **Epic balance:** are all tasks stuffed under one `Feature`? Propose splitting into distinct Features.
 - **Context from external sources:** if the builder mentions meeting notes, transcripts, PRDs, or Slack threads — read them and update task descriptions with actionable details.
 
 ### Step 6a: Duplicate-pair detection (mandatory)
@@ -172,7 +175,7 @@ Walk the project's open tasks (skip DONE / Ready for Release) and surface likely
 |---|---|
 | Title token overlap | ≥50% of significant tokens shared (lowercase + stopword strip) |
 | Substring containment | One title appears in the other (after stopword strip) |
-| Same parent EPIC | Both sit under the same EPIC |
+| Same Feature | Both carry the same `Feature` value (same epic) |
 | Same source | Both `Source: …` lines reference the same meeting / email / channel / commit / PR |
 | Same domain noun | Both reference the same primary entity (specific noun, not generic verb) |
 
@@ -257,10 +260,10 @@ All newly created tasks from external source enrichment go to the **BACKLOG** se
 - Set Priority based on urgency signals in the source (explicit deadlines → P1, "nice to have" → P3)
 - Set Task Type (Story, Bug, Chore, Spike based on the nature of the request)
 - Auto-estimate Story Points based on description complexity
-- Parent under the appropriate Epic if one exists
+- Set the `Feature` field to the appropriate epic (and `Theme` if known) — **as a top-level task; never create it as a subtask**
 - Do NOT assign — leave unassigned for triage
 
-**Subtask gotcha — when parenting under an Epic, call `addProject` after create.** Asana drops the `projects` / `memberships` params when `parent` is set, leaving the new task parented but unprojected. Custom-field PUTs then fail with "Custom field with ID X is not on given object" (400). After `asana_create_task` with a `parent`, immediately call `POST /tasks/<new_gid>/addProject` for each project the parent is on, **before** setting any custom fields. Recovery for already-broken state: `python3 scripts/asana_ops.py --add-subtasks-to-project <parent_gid>` (idempotent).
+**Flat-task rule — never create a subtask for a workflow item.** Asana can't move a subtask between board sections, so it can never flow INBOX → DONE. Always create tasks top-level with `projects` / `memberships` set, and carry the epic via the `Feature` field instead of a `parent`. If you ever find subtasks (legacy data, or another tool created them), elevate them: `python3 scripts/asana_ops.py --elevate-subtasks <PROJECT_GID>` (non-destructive — keeps gid, comments, attachments; copies the parent's Feature/Theme onto each child). See `docs/asana-best-practices.md` → "Subtask elevation".
 
 ### Step 7d: Report summary
 
