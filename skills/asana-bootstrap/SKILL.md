@@ -1,13 +1,12 @@
 ---
 name: asana-bootstrap
 description: >
-  Create a new Asana project with all Fraction standards applied at creation
-  time — required admins, the 8 standard custom fields (incl. Theme + Feature),
-  the 8 standard sections (INBOX→DONE), project metadata, an initial Release
-  option, and optional EPIC scaffold (top-level definition cards). Creation-time inverse of `asana-hygiene` (same rules, applied
-  up-front). Triggers on "create an Asana project/board", "set up an Asana
-  board", "new Asana project", "bootstrap Asana", "spin up a project in Asana
-  using our standards". NOT for full DevHawk bootstrap (use `bootstrap`), adding
+  Create a new Asana project with Fraction standards applied up front — required
+  admins, the 8 custom fields (incl. Theme + Feature), 8 sections (INBOX→DONE),
+  metadata, an initial Release option, and an optional EPIC scaffold (top-level
+  definition cards). The creation-time inverse of `asana-hygiene`. Triggers on
+  "create an Asana project/board", "set up an Asana board", "new Asana project",
+  "bootstrap Asana". NOT for full DevHawk bootstrap (use `bootstrap`), adding
   cards (use `add-card`), or fixing an existing project (use `asana-hygiene`).
 seed_managed: true
 requires_tools: [python3]

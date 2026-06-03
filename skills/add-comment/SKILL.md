@@ -1,18 +1,13 @@
 ---
 name: add-comment
 description: >
-  Post a comment on a PM card (Asana task / Shortcut story / Linear issue /
-  Jira issue), converting freeform user input (Markdown or plain text) into
-  the format each system actually accepts. Asana especially is fussy — it
-  rejects anything outside a narrow HTML allowlist with an unhelpful 400.
-  This skill validates *before* the network call so the user never sees a
-  silent failure. Triggers on "comment on card X", "add a comment", "leave
-  a note on the ticket", "reply on the card", "post update to <card>",
-  "@mention <person> on <card>", or any request to add a single comment.
-  Do NOT use for posting status updates on a project (use the project
-  status update flow), for updating a card's description (use the relevant
-  edit path), or for bulk commenting (loop this skill, but mute
-  notifications per the bulk rule).
+  Post a comment on a PM card (Asana / Shortcut / Linear / Jira), converting
+  Markdown or plain text into the format each system accepts — Asana's narrow
+  HTML allowlist is validated before the call so you never hit a silent 400.
+  Triggers on "comment on card X", "add a comment", "leave a note on the
+  ticket", "reply on the card", "post update to <card>", "@mention <person> on
+  <card>". NOT for project status updates, editing a card's description, or bulk
+  commenting (loop with notifications muted).
 seed_managed: true
 requires_mcp_any_of: [asana, shortcut, linear]
 ---

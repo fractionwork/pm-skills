@@ -3,13 +3,13 @@ name: add-card
 description: >
   REQUIRED for any single-card creation in an existing PM project — do NOT call
   PM MCP `create_task*` / `create_story` / `create_issue` directly; invoke this
-  so hygiene rules and audit attribution are applied. Creates one Asana/Shortcut/
-  Linear card routed to INBOX (pre-stakeholder idea) or BACKLOG (validated work),
-  with source attribution, Feature field (the epic it supports), standard fields,
-  and a filterable `devhawk:add-card` marker. Always top-level — never a subtask. Triggers on "add a ticket/card/task/story/issue",
-  "new card", "log a bug", "open an issue", "track this", "park this idea",
-  "PM mentioned". NOT for bulk imports (use asana-hygiene Step 7) or new-project
-  setup (use bootstrap).
+  so hygiene + audit attribution are applied. Creates one Asana/Shortcut/Linear
+  card in INBOX (unvalidated idea) or BACKLOG (validated), top-level with a
+  Feature (the epic it supports), source attribution, standard fields, and a
+  `devhawk:add-card` marker — never a subtask. Triggers on "add a
+  ticket/card/task/story/issue", "new card", "log a bug", "open an issue",
+  "track this", "park this idea", "PM mentioned". NOT for bulk imports (use
+  asana-hygiene) or new-project setup (use bootstrap).
 seed_managed: true
 requires_mcp_any_of: [asana, shortcut, linear]
 ---

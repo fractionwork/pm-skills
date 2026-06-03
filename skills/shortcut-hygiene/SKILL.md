@@ -3,12 +3,10 @@ name: shortcut-hygiene
 description: >
   Audit and fix a Shortcut project against Fraction best practices — missing
   Priority field, stories without estimates/owners/types, missing epics, vague
-  titles, empty descriptions, workflow coverage, stale Inbox stories. Reports
-  gaps with story name + permalink and offers fixes; can also enrich the backlog
-  from transcripts/emails/chat. Enforces all checks by default unless the user
-  opts out. Triggers on "clean up shortcut", "audit shortcut project", "fix
-  shortcut board", "standardize shortcut", "shortcut hygiene", "enrich shortcut
-  backlog".
+  or empty descriptions, workflow coverage, stale Inbox. Reports gaps with story
+  name + permalink and offers fixes; can enrich the backlog from
+  transcripts/emails/chat. Triggers on "clean up shortcut", "audit shortcut
+  project", "fix shortcut board", "shortcut hygiene", "enrich shortcut backlog".
 seed_managed: true
 requires_tools: [python3]
 requires_files: [scripts/shortcut_ops.py]

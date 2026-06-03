@@ -7,7 +7,7 @@ skills to manage cards consistently.
 
 ## Available PM skills
 
-- **`add-card`** — create a new card with all hygiene rules applied (sections, fields, parent EPIC, source attribution, dupe detection)
+- **`add-card`** — create a new top-level card with all hygiene rules applied (sections, fields, Feature, source attribution, dupe detection)
 - **`add-comment`** — post a comment on an existing card; converts Markdown into the format each system actually accepts (Asana's HTML allowlist is fussy — this skill validates *before* the call so you never see a silent failure)
 - **`card-done`** — close a card with a summary comment; works for dev-flavored merges and PM-flavored manual closeouts
 - **`asana-hygiene`** — audit + fix an Asana project against Fraction best practices; includes duplicate-pair detection
@@ -61,8 +61,8 @@ When the user asks to **add a new card** on an existing PM project — phrases l
 Defer to the `add-card` skill. Specifically:
 
 - Section = BACKLOG (new validated work) or INBOX (pre-discussion ideas) — see the skill for which trigger phrases route where
-- All required custom fields populated for the target section (Priority / Task Type / Story Points / Release / Sprint, etc. for BACKLOG; lighter for INBOX)
-- Parent EPIC identified or surfaced for input
+- All required custom fields populated for the target section (Priority / Task Type / Story Points / Release / Sprint / Theme, etc. for BACKLOG; lighter for INBOX)
+- Feature (the epic it supports) identified or surfaced for input — set as a field, not a parent (flat-task model)
 - Source attribution applied (Rule 1)
 - Title not vague (≤4 words + generic verb pattern fails)
 - Description not empty

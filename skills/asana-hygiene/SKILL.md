@@ -1,14 +1,13 @@
 ---
 name: asana-hygiene
 description: >
-  Audit and fix an Asana project against Fraction best practices — missing custom
-  fields (incl. Release enum), orphaned tasks, incomplete metadata, missing
-  admins, unestimated stories, vague titles, empty descriptions, non-standard
-  sections, stale INBOX items. Fixes automatically, reports what needs manual
-  attention; can enrich the backlog from transcripts/emails/chat. Enforces all
-  checks by default unless the user opts out. Triggers on "clean up asana",
-  "audit project", "fix asana board", "standardize project", "asana hygiene",
-  "enrich backlog".
+  Audit and fix an Asana project against Fraction best practices — missing
+  custom fields (incl. Theme + Feature), subtasks that need elevating to
+  top-level (flat-task model), orphaned tasks, missing admins,
+  unestimated/vague/empty cards, non-standard sections, stale INBOX. Auto-fixes
+  what it can and reports the rest; can enrich the backlog from
+  transcripts/emails/chat. Triggers on "clean up asana", "audit project", "fix
+  asana board", "standardize project", "asana hygiene", "enrich backlog".
 seed_managed: true
 requires_tools: [python3]
 requires_files: [scripts/asana_ops.py]
