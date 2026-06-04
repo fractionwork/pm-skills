@@ -146,7 +146,7 @@ For **Asana** (8 standard custom fields per `docs/asana-best-practices.md`):
 | Release | leave unset | Active phase. If unknown, default to `Phase 1`. For ELEVAT3 currently: `Phase 2`. | If the project has multiple active phases |
 | Sprint | none | None unless the user explicitly says "for this sprint" | Only if user mentions a sprint by name |
 | **Feature** (text) | set if known | The epic this supports — **free string**, matched to an existing `Feature` value where one fits (reuse, don't fork the spelling) | If no obvious epic → ask, or set "Feature pending" |
-| **Theme** (enum) | leave unset | The Saga / release-theme — pick an existing Theme option | If ambiguous which saga |
+| **Theme** (text) | set if known | The project's theme/arc — **free string**, reuse an existing Theme value used in this project (don't fork the spelling) | If ambiguous which theme |
 | Owner / assignee | unassigned | **Leave unassigned** — owner gets set during sprint planning | Never auto-assign |
 
 INBOX cards intentionally skip Priority / Type / Points / Release — these get filled in during the INBOX → BACKLOG promotion conversation, not before.

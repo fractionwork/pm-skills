@@ -350,7 +350,7 @@ REQUIRED_FIELDS = {
     "1204575864766299": "Task Progress",
     "1214267151463854": "Release",
     "1205043346485340": "Sprint",
-    "1214396024164946": "Theme",    # enum — Saga / release-theme grouping
+    "1215430560993891": "Theme",    # text — per-project theme (free string)
     "1215357133051817": "Feature",  # text — the epic/feature a task supports (flat-model)
 }
 REQUIRED_ADMINS = {
@@ -376,7 +376,7 @@ SPRINT_FIELD_GID = "1205043346485340"  # workspace-level multi_enum
 SP_FIELD_GID = "1208941031000919"
 PRIORITY_FIELD_GID = "1214202045134883"
 TYPE_FIELD_GID = "1214202179972377"
-THEME_FIELD_GID = "1214396024164946"    # enum — Saga / release theme
+THEME_FIELD_GID = "1215430560993891"    # text — per-project theme (free string)
 FEATURE_FIELD_GID = "1215357133051817"  # text — epic/feature this task supports
 
 
@@ -863,13 +863,13 @@ def elevate_subtasks(project_gid, dry_run=False):
     for p in parents:
         pdata = api("GET", f"/tasks/{p['gid']}", params={
             "opt_fields": "name,memberships.section.name,"
-                          "custom_fields.gid,custom_fields.enum_value.gid"})
+                          "custom_fields.gid,custom_fields.text_value"})
         pd = pdata["data"] if pdata else {}
         pname = pd.get("name", p["name"])
         psection = next((m["section"]["name"] for m in pd.get("memberships", [])
                          if m.get("section")), None)
-        ptheme = next((cf["enum_value"]["gid"] for cf in pd.get("custom_fields", [])
-                       if cf.get("gid") == THEME_FIELD_GID and cf.get("enum_value")), None)
+        ptheme = next((cf["text_value"] for cf in pd.get("custom_fields", [])
+                       if cf.get("gid") == THEME_FIELD_GID and cf.get("text_value")), None)
         # Keep the parent EPIC card; tag its own Feature so it groups with its tasks.
         api("PUT", f"/tasks/{p['gid']}", {"custom_fields": {FEATURE_FIELD_GID: pname}},
             dry_run=dry_run)
@@ -1419,7 +1419,6 @@ def main():
     parser.add_argument("--add-sprint-option", metavar="SPRINT_NAME", help="Add a new enum option to the Sprint custom field (convention: 'Sprint M/D-M/D')")
     parser.add_argument("--add-subtasks-to-project", metavar="TASK_GID", help="[legacy] Add all direct subtasks of TASK_GID to the parent's projects WITHOUT detaching. Superseded by --elevate-subtasks under the flat-task policy.")
     parser.add_argument("--elevate-subtasks", metavar="PROJECT_GID", help="Flat-task fix: promote every subtask in PROJECT_GID to a top-level task (addProject+section, then setParent null), copy the parent's Feature/Theme onto each child, keep the parent EPIC card. Idempotent; repairs dual state.")
-    parser.add_argument("--add-theme-option", metavar="SAGA_NAME", help="Add a new enum option (a Saga) to the Theme custom field")
     parser.add_argument("--post-comment", nargs="+", metavar="TASK_GID", help="Post a comment on a task. Pass HTML as the second arg, or '-' to read HTML from stdin. Example: --post-comment 1234 '<body><p>hello</p></body>' or echo '<body>...</body>' | --post-comment 1234 -")
     parser.add_argument("--attach-file", nargs=2, metavar=("TASK_GID", "FILE_PATH"), help="Upload a local file as an attachment on a task (fills the MCP gap — MCP can't upload local files). Asana caps a single attachment at 100MB.")
     parser.add_argument("--ensure-audit-tag", action="store_true", help=f"Idempotent: ensure the workspace-level '{ADD_CARD_AUDIT_TAG_NAME}' tag exists; prints its gid. Used by the add-card skill to stamp skill-created cards.")
@@ -1477,15 +1476,6 @@ def main():
 
     if args.elevate_subtasks:
         elevate_subtasks(args.elevate_subtasks, args.dry_run)
-        return
-
-    if args.add_theme_option:
-        resp = api("POST", f"/custom_fields/{THEME_FIELD_GID}/enum_options",
-                   {"name": args.add_theme_option, "insert_before": None})
-        if resp:
-            print(f"Created Theme option: {args.add_theme_option} → {resp['data']['gid']}")
-        else:
-            print("FAILED")
         return
 
     if args.post_comment:

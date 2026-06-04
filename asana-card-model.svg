@@ -56,7 +56,7 @@
     <rect x="58" y="242" width="188" height="24" rx="5" fill="#1b2030" stroke="#2b3344"/><text x="68" y="258" fill="#cbd5e1">Fraction Priority</text><text x="238" y="258" text-anchor="end" fill="#64748b">enum</text>
     <rect x="58" y="272" width="188" height="24" rx="5" fill="#1b2030" stroke="#2b3344"/><text x="68" y="288" fill="#cbd5e1">Story Points</text><text x="238" y="288" text-anchor="end" fill="#64748b">number</text>
     <rect x="58" y="302" width="188" height="24" rx="5" fill="#1b2030" stroke="#2b3344"/><text x="68" y="318" fill="#cbd5e1">Sprint</text><text x="238" y="318" text-anchor="end" fill="#64748b">multi-enum</text>
-    <rect x="58" y="332" width="188" height="24" rx="5" fill="#161a2e" stroke="#7c3aed" stroke-width="1.2"/><text x="68" y="348" fill="#e9d5ff" font-weight="600">Theme</text><text x="238" y="348" text-anchor="end" fill="#a78bfa">enum · Saga</text>
+    <rect x="58" y="332" width="188" height="24" rx="5" fill="#161a2e" stroke="#7c3aed" stroke-width="1.2"/><text x="68" y="348" fill="#e9d5ff" font-weight="600">Theme</text><text x="238" y="348" text-anchor="end" fill="#a78bfa">text · free</text>
   </g>
   <!-- col 2 -->
   <g font-size="9.5">
@@ -77,7 +77,7 @@
   <!-- taxonomy chips Theme -> Feature -> Task -->
   <rect x="520" y="138" width="180" height="56" rx="9" fill="#1a1530" stroke="#a855f7" stroke-width="1.6" filter="url(#shadow)"/>
   <text x="610" y="162" text-anchor="middle" fill="#fff" font-size="12" font-weight="700">THEME</text>
-  <text x="610" y="180" text-anchor="middle" fill="#c4b5fd" font-size="9">Saga · enum</text>
+  <text x="610" y="180" text-anchor="middle" fill="#c4b5fd" font-size="9">project theme · text</text>
   <path d="M 704 166 H 736" stroke="#a855f7" stroke-width="2" marker-end="url(#mPurple)"/>
   <rect x="740" y="138" width="180" height="56" rx="9" fill="#10212a" stroke="#06b6d4" stroke-width="1.6" filter="url(#shadow)"/>
   <text x="830" y="162" text-anchor="middle" fill="#fff" font-size="12" font-weight="700">FEATURE</text>
@@ -215,7 +215,7 @@
 
   <!-- footer legend -->
   <line x1="40" y1="806" x2="1160" y2="806" stroke="#262b38" stroke-width="1"/>
-  <circle cx="52" cy="826" r="5" fill="#a855f7"/><text x="62" y="830" fill="#94a3b8" font-size="9.5">Theme — Saga (enum, curated)</text>
+  <circle cx="52" cy="826" r="5" fill="#a855f7"/><text x="62" y="830" fill="#94a3b8" font-size="9.5">Theme — project theme (free text)</text>
   <circle cx="262" cy="826" r="5" fill="#06b6d4"/><text x="272" y="830" fill="#94a3b8" font-size="9.5">Feature — Epic (free text)</text>
   <path d="M 474 821 l 7 7 l -7 7 l -7 -7 z" fill="#1f2937" stroke="#f59e0b" stroke-width="1.2"/><text x="488" y="830" fill="#94a3b8" font-size="9.5">stakeholder gate (INBOX → BACKLOG)</text>
   <text x="1160" y="830" text-anchor="end" fill="#475569" font-size="9">canonical: docs/asana-best-practices.md → "Task structure"</text>
