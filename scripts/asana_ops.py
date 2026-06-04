@@ -647,17 +647,54 @@ def hygiene_audit(project_gid, dry_run=False):
     print(f"   Empty descriptions: {len(no_desc)}")
     _print_offenders(no_desc)
 
-    # Missing Feature (flat-model grouping — surface for triage, don't auto-fix:
-    # the epic name is a judgement call). INBOX exempt — Feature is set at promotion.
+    # Missing Feature (flat-model grouping — the epic a task supports). Feature is
+    # free-text, per-project. Auto-fix is safe ONLY when the project already uses
+    # exactly one Feature (unambiguous → blanks inherit it); with zero or multiple
+    # epics in play the value is a judgement call, so surface for triage. INBOX
+    # exempt — Feature is set at the INBOX → BACKLOG promotion.
     def feature_value(t):
         for cf in t.get("custom_fields", []):
             if cf.get("gid") == FEATURE_FIELD_GID:
                 return (cf.get("text_value") or "").strip()
         return ""
+    features_in_use = {feature_value(t) for t in incomplete if feature_value(t)}
     missing_feature = [t for t in incomplete_strict
                        if not t["name"].startswith("EPIC:") and not feature_value(t)]
     print(f"   Missing Feature (excl. INBOX): {len(missing_feature)}")
-    _print_offenders(missing_feature)
+    if missing_feature and len(features_in_use) == 1:
+        sole_f = next(iter(features_in_use))
+        print(f"   → Single project Feature in use ({sole_f!r}) — filling {len(missing_feature)} blank(s)...")
+        if not dry_run:
+            for task in missing_feature:
+                api("PUT", f"/tasks/{task['gid']}", {"custom_fields": {FEATURE_FIELD_GID: sole_f}})
+                fixes += 1
+    elif missing_feature:
+        _print_offenders(missing_feature)
+
+    # Missing Theme (flat-model grouping — the project's theme/arc). Theme is a
+    # free-text, per-project field (no shared enum), so there's no global default.
+    # Auto-fix is safe ONLY when the project already uses exactly one Theme
+    # (unambiguous → fill the blanks); with zero or multiple themes in play the
+    # value is a judgement call, so surface for triage like Feature. INBOX exempt.
+    def theme_value(t):
+        for cf in t.get("custom_fields", []):
+            if cf.get("gid") == THEME_FIELD_GID:
+                return (cf.get("text_value") or "").strip()
+        return ""
+    themes_in_use = {theme_value(t) for t in incomplete if theme_value(t)}
+    missing_theme = [t for t in incomplete_strict
+                     if not t["name"].startswith("EPIC:") and not theme_value(t)]
+    print(f"   Missing Theme (excl. INBOX): {len(missing_theme)}")
+    if missing_theme and len(themes_in_use) == 1:
+        sole = next(iter(themes_in_use))
+        print(f"   → Single project Theme in use ({sole!r}) — filling {len(missing_theme)} blank(s)...")
+        if not dry_run:
+            for task in missing_theme:
+                api("PUT", f"/tasks/{task['gid']}", {"custom_fields": {THEME_FIELD_GID: sole}})
+                fixes += 1
+    elif missing_theme:
+        # ambiguous (0 or >1 themes in use) — can't safely default; report
+        _print_offenders(missing_theme)
 
     # Subtasks present (flat-model violation — Asana can't move a subtask between
     # board sections, so it's stuck). Two shapes: a task that still has a parent

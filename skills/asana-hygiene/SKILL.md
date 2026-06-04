@@ -44,7 +44,8 @@ This runs the full audit and auto-fixes:
 - **Orphaned tasks:** reports tasks with no section
 - **Vague titles:** reports "fix/update/misc" titles for manual cleanup (applies to all sections, including INBOX)
 - **Empty descriptions:** reports tasks with no description (applies to all sections — INBOX still requires a 1-2 sentence description + Source line)
-- **Missing Feature (excl. INBOX):** reports non-EPIC tasks with no `Feature` value — INBOX exempt (Feature is set at the INBOX → BACKLOG promotion)
+- **Missing Feature (excl. INBOX):** non-EPIC tasks with no `Feature` value. `Feature` is free-text and **per-project**, so hygiene **auto-fills only when the project already uses exactly one Feature** (unambiguous → blanks inherit it); with zero or multiple epics in play it reports for triage (the value is a judgement call). INBOX exempt — Feature is set at the INBOX → BACKLOG promotion.
+- **Missing Theme (excl. INBOX):** non-EPIC tasks with no `Theme` value. `Theme` is free-text and **per-project** (no shared enum), so hygiene **auto-fills only when the project already uses exactly one Theme** (unambiguous → blanks inherit it); with zero or multiple themes in play it reports for triage (the value is a judgement call). INBOX exempt.
 - **Subtasks present (flat-model violation):** reports any task that still has a parent, or still owns subtasks. Asana can't move a subtask between board sections, so these are stuck. Fix with `python3 scripts/asana_ops.py --elevate-subtasks <PROJECT_GID>` (non-destructive — see `docs/asana-best-practices.md` → "Subtask elevation"). Also catches the dual state (member of a project *and* still parented).
 - **Non-standard sections:** reports any sections beyond the 8 standards (INBOX → DONE)
 
