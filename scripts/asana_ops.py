@@ -56,6 +56,17 @@ TOKEN_FILE = Path(os.environ.get("ASANA_TOKEN_FILE", ".asana-token.json"))
 class AsanaAuthError(Exception):
     """No usable Asana credential (neither OAuth token nor PAT). Raised by
     get_token() so embedders can handle it; the CLI catches it at the bottom."""
+
+
+class AsanaWorkspaceError(Exception):
+    """Workspace can't be resolved — the account has multiple workspaces and
+    none was selected (no ASANA_WORKSPACE, no saved choice). The user must pick
+    once. Caught by the CLI; the MCP server reports it and exits."""
+
+
+# Persisted workspace choice — so a multi-workspace user picks ONCE and both the
+# CLI and the MCP server reuse it. Overridable like TOKEN_FILE for server reuse.
+WORKSPACE_FILE = Path(os.environ.get("ASANA_WORKSPACE_FILE", ".asana-workspace.json"))
 LOG_FILE = Path("asana_cleanup.log")
 REPORT_FILE = Path("asana_cleanup_report.md")
 
@@ -229,6 +240,63 @@ def get_token():
     raise AsanaAuthError(
         "No Asana auth available. Run `python3 scripts/asana_ops.py --auth` "
         "for OAuth, or set ASANA_PAT / ASANA_ACCESS_TOKEN.")
+
+
+# ── Workspace resolution (multi-workspace accounts pick once) ──
+def account_workspaces():
+    """Return the account's workspaces as [{gid, name}, ...]."""
+    me = api("GET", "/users/me", params={"opt_fields": "workspaces.name"})
+    if not me:
+        raise AsanaAuthError("Auth failed resolving workspaces. Run --auth or set a PAT.")
+    return me["data"].get("workspaces", [])
+
+
+def _persist_workspace(gid, name=""):
+    try:
+        WORKSPACE_FILE.write_text(json.dumps({"gid": gid, "name": name}))
+    except OSError:
+        pass  # non-fatal — falls back to env/derivation next run
+
+
+def resolve_workspace(interactive=False):
+    """Resolve the active workspace GID. Precedence:
+      1. ASANA_WORKSPACE env var
+      2. saved choice in WORKSPACE_FILE (the "pick once" result)
+      3. the sole workspace if the account has exactly one (auto-saved)
+      4. interactive prompt (TTY only) → saved
+    Otherwise raise AsanaWorkspaceError so the caller tells the user to pick once.
+    """
+    env = os.environ.get("ASANA_WORKSPACE", "").strip()
+    if env:
+        return env
+    if WORKSPACE_FILE.exists():
+        try:
+            gid = json.loads(WORKSPACE_FILE.read_text()).get("gid")
+            if gid:
+                return gid
+        except (ValueError, OSError):
+            pass
+    wss = account_workspaces()
+    if not wss:
+        raise AsanaWorkspaceError("This account belongs to no Asana workspaces.")
+    if len(wss) == 1:
+        _persist_workspace(wss[0]["gid"], wss[0].get("name", ""))
+        return wss[0]["gid"]
+    if interactive and sys.stdin.isatty():
+        print("Pick your Asana workspace (saved for next time):", file=sys.stderr)
+        for i, w in enumerate(wss, 1):
+            print(f"  {i}. {w.get('name', '?')} ({w['gid']})", file=sys.stderr)
+        try:
+            sel = wss[int(input("> ").strip()) - 1]
+        except (ValueError, IndexError):
+            raise AsanaWorkspaceError("Invalid selection.")
+        _persist_workspace(sel["gid"], sel.get("name", ""))
+        return sel["gid"]
+    listing = ", ".join(f"{w.get('name', '?')} ({w['gid']})" for w in wss)
+    raise AsanaWorkspaceError(
+        "Multiple Asana workspaces and none selected. Pick once with "
+        "`python3 scripts/asana_ops.py --pick-workspace`, set `--set-workspace <gid>`, "
+        f"or export ASANA_WORKSPACE. Available: {listing}")
 
 
 # ── Logging ──
@@ -1107,12 +1175,8 @@ def ensure_audit_tag(dry_run=False):
     per workspace. Safe to re-run — finds the existing tag and prints its gid
     without creating a duplicate.
     """
-    me = api("GET", "/users/me", params={"opt_fields": "workspaces.gid"})
-    if not me:
-        # Raise (not sys.exit) so embedders like the MCP server aren't killed
-        # mid-request; the CLI __main__ catches AsanaAuthError and exits cleanly.
-        raise AsanaAuthError("Auth failed resolving workspace. Run --auth or set ASANA_PAT.")
-    ws_gid = me["data"]["workspaces"][0]["gid"]
+    # Resolve the active workspace (multi-workspace accounts pick once).
+    ws_gid = resolve_workspace()
 
     # Look for an existing tag with the canonical name. The workspace tags
     # endpoint paginates; we accept up to a few hundred tags before giving up.
@@ -1476,6 +1540,9 @@ def main():
     parser.add_argument("--post-comment", nargs="+", metavar="TASK_GID", help="Post a comment on a task. Pass HTML as the second arg, or '-' to read HTML from stdin. Example: --post-comment 1234 '<body><p>hello</p></body>' or echo '<body>...</body>' | --post-comment 1234 -")
     parser.add_argument("--attach-file", nargs=2, metavar=("TASK_GID", "FILE_PATH"), help="Upload a local file as an attachment on a task (fills the MCP gap — MCP can't upload local files). Asana caps a single attachment at 100MB.")
     parser.add_argument("--ensure-audit-tag", action="store_true", help=f"Idempotent: ensure the workspace-level '{ADD_CARD_AUDIT_TAG_NAME}' tag exists; prints its gid. Used by the add-card skill to stamp skill-created cards.")
+    parser.add_argument("--list-workspaces", action="store_true", help="List the account's Asana workspaces (gid + name).")
+    parser.add_argument("--set-workspace", metavar="WORKSPACE_GID", help="Persist the active workspace choice (for multi-workspace accounts). Both the CLI and the MCP server reuse it.")
+    parser.add_argument("--pick-workspace", action="store_true", help="Interactively pick the active workspace once and save it.")
     parser.add_argument("--track", choices=["A", "B", "C", "D", "E", "all"])
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--borderline", nargs="*", help="GIDs of borderline projects (Track A)")
@@ -1555,6 +1622,25 @@ def main():
         attach_file(args.attach_file[0], args.attach_file[1], args.dry_run)
         return
 
+    if args.list_workspaces:
+        for w in account_workspaces():
+            print(f"{w['gid']}\t{w.get('name', '?')}")
+        return
+
+    if args.set_workspace:
+        names = {w["gid"]: w.get("name", "") for w in account_workspaces()}
+        if args.set_workspace not in names:
+            print(f"  ✗ {args.set_workspace} is not a workspace on this account", file=sys.stderr)
+            sys.exit(1)
+        _persist_workspace(args.set_workspace, names[args.set_workspace])
+        print(f"Active workspace set: {names[args.set_workspace]} ({args.set_workspace}) → {WORKSPACE_FILE}")
+        return
+
+    if args.pick_workspace:
+        gid = resolve_workspace(interactive=True)
+        print(f"Active workspace: {gid} → {WORKSPACE_FILE}")
+        return
+
     if args.ensure_audit_tag:
         if ensure_audit_tag(args.dry_run) is None and not args.dry_run:
             sys.exit(1)
@@ -1577,7 +1663,7 @@ def main():
     if not me:
         print("Auth failed. Run --auth or set ASANA_PAT.")
         sys.exit(1)
-    ws_gid = me["data"]["workspaces"][0]["gid"]
+    ws_gid = resolve_workspace()  # multi-workspace accounts pick once
     print(f"User: {me['data']['name']} | Workspace: {ws_gid}")
     print(f"Mode: {'DRY RUN' if args.dry_run else 'LIVE'}\n")
 
@@ -1607,6 +1693,6 @@ def main():
 if __name__ == "__main__":
     try:
         main()
-    except AsanaAuthError as e:
+    except (AsanaAuthError, AsanaWorkspaceError) as e:
         print(f"  ✗ {e}")
         sys.exit(1)
