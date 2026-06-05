@@ -1543,6 +1543,7 @@ def main():
     parser.add_argument("--list-workspaces", action="store_true", help="List the account's Asana workspaces (gid + name).")
     parser.add_argument("--set-workspace", metavar="WORKSPACE_GID", help="Persist the active workspace choice (for multi-workspace accounts). Both the CLI and the MCP server reuse it.")
     parser.add_argument("--pick-workspace", action="store_true", help="Interactively pick the active workspace once and save it.")
+    parser.add_argument("--list-projects", action="store_true", help="List non-archived projects in the active workspace (gid<TAB>name). Lets Claude show projects by name so the user picks one to fence the MCP to — no hunting GIDs from URLs.")
     parser.add_argument("--track", choices=["A", "B", "C", "D", "E", "all"])
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--borderline", nargs="*", help="GIDs of borderline projects (Track A)")
@@ -1639,6 +1640,13 @@ def main():
     if args.pick_workspace:
         gid = resolve_workspace(interactive=True)
         print(f"Active workspace: {gid} → {WORKSPACE_FILE}")
+        return
+
+    if args.list_projects:
+        ws = resolve_workspace()
+        for p in paginate(f"/workspaces/{ws}/projects", opt_fields="name,archived"):
+            if not p.get("archived"):
+                print(f"{p['gid']}\t{p['name']}")
         return
 
     if args.ensure_audit_tag:
