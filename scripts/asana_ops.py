@@ -47,7 +47,15 @@ ASANA_CLIENT_SECRET = "e2039abfba03f82ac88c79cd7568bbcc"
 ASANA_AUTH_URL = "https://app.asana.com/-/oauth_authorize"
 ASANA_TOKEN_URL = "https://app.asana.com/-/oauth_token"
 CALLBACK_PORT = 8372
-TOKEN_FILE = Path(".asana-token.json")
+# Token file path is overridable so the module can be reused by a long-running
+# server (e.g. scripts/asana_mcp.py) where cwd isn't the repo root. Each user
+# points ASANA_TOKEN_FILE at their own OAuth token store.
+TOKEN_FILE = Path(os.environ.get("ASANA_TOKEN_FILE", ".asana-token.json"))
+
+
+class AsanaAuthError(Exception):
+    """No usable Asana credential (neither OAuth token nor PAT). Raised by
+    get_token() so embedders can handle it; the CLI catches it at the bottom."""
 LOG_FILE = Path("asana_cleanup.log")
 REPORT_FILE = Path("asana_cleanup_report.md")
 
@@ -209,13 +217,18 @@ def get_token():
             return refreshed
         print("OAuth token expired and refresh failed. Re-run --auth or set ASANA_PAT.")
 
-    # Fallback to PAT
-    pat = os.environ.get("ASANA_PAT", "")
+    # Fallback to PAT. ASANA_ACCESS_TOKEN is accepted as an alias (the name the
+    # MCP ecosystem uses); ASANA_PAT takes precedence if both are set.
+    pat = os.environ.get("ASANA_PAT") or os.environ.get("ASANA_ACCESS_TOKEN") or ""
     if pat:
         return pat
 
-    print("No auth available. Run: python3 scripts/asana_ops.py --auth")
-    sys.exit(1)
+    # Raise (not sys.exit) so embedders like the MCP server can report a clean
+    # error instead of having the process killed mid-request. The CLI entrypoint
+    # catches this and prints the friendly message + exits 1.
+    raise AsanaAuthError(
+        "No Asana auth available. Run `python3 scripts/asana_ops.py --auth` "
+        "for OAuth, or set ASANA_PAT / ASANA_ACCESS_TOKEN.")
 
 
 # ── Logging ──
@@ -1096,8 +1109,9 @@ def ensure_audit_tag(dry_run=False):
     """
     me = api("GET", "/users/me", params={"opt_fields": "workspaces.gid"})
     if not me:
-        print("Auth failed. Run --auth or set ASANA_PAT.", file=sys.stderr)
-        sys.exit(1)
+        # Raise (not sys.exit) so embedders like the MCP server aren't killed
+        # mid-request; the CLI __main__ catches AsanaAuthError and exits cleanly.
+        raise AsanaAuthError("Auth failed resolving workspace. Run --auth or set ASANA_PAT.")
     ws_gid = me["data"]["workspaces"][0]["gid"]
 
     # Look for an existing tag with the canonical name. The workspace tags
@@ -1113,8 +1127,11 @@ def ensure_audit_tag(dry_run=False):
 
     resp = api("POST", f"/workspaces/{ws_gid}/tags", {"name": ADD_CARD_AUDIT_TAG_NAME})
     if not resp:
+        # Return None (not sys.exit) so an embedder degrades gracefully — the MCP
+        # capture_inbox_idea checks `if tag:` and just skips the tag attach. The
+        # CLI --ensure-audit-tag handler turns a None into exit 1.
         print(f"FAILED to create tag '{ADD_CARD_AUDIT_TAG_NAME}'", file=sys.stderr)
-        sys.exit(1)
+        return None
     tag_gid = resp["data"]["gid"]
     print(tag_gid)
     return tag_gid
@@ -1539,7 +1556,8 @@ def main():
         return
 
     if args.ensure_audit_tag:
-        ensure_audit_tag(args.dry_run)
+        if ensure_audit_tag(args.dry_run) is None and not args.dry_run:
+            sys.exit(1)
         return
 
     if args.hygiene:
@@ -1587,4 +1605,8 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except AsanaAuthError as e:
+        print(f"  ✗ {e}")
+        sys.exit(1)
