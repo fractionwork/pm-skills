@@ -20,7 +20,7 @@ Create a single PM card with all hygiene rules baked in. Mirror of how `asana-hy
 
 The canonical hygiene rules live in `docs/asana-best-practices.md` and `.claude/skills/asana-hygiene/SKILL.md`. This skill is the **creation-time enforcement layer** — don't duplicate the rules here, reference them.
 
-> **Asana MCP fails or lacks a capability? Fall back to `scripts/asana_ops.py` — don't give up.** The script self-authenticates and hits the REST API directly, so it can do anything the MCP can plus what the MCP structurally can't (create fields/sections/tags, upload files via `--attach-file`, archive, etc.). Full command surface + fallback rule in `docs/asana-best-practices.md` → "MCP limitations and the asana_ops.py fallback".
+> **Tool precedence:** prefer the **first-party `asana` MCP** (`scripts/asana_mcp.py`); fall back to **`scripts/asana_ops.py`** for anything it doesn't expose or when the MCP isn't connected; do **not** use other Asana MCPs (the official plugin / community servers are superseded). The script self-authenticates and hits the REST API directly, so it can do anything the MCP can plus what the MCP structurally can't (create fields/sections/tags, upload files via `--attach-file`, archive, etc.). Full precedence + command surface in `docs/asana-best-practices.md` → "Tool precedence".
 
 ## Step 1: Resolve the target project
 

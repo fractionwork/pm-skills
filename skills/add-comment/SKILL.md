@@ -146,7 +146,7 @@ If using wiki markup, no validation. If using ADF, verify the JSON shape matches
 
 | System | How |
 |---|---|
-| **Asana** | `mcp__claude_ai_Asana__add_comment` with the assembled HTML. If the MCP isn't available, fall back to `python3 scripts/asana_ops.py --post-comment <task_gid> '<html>'`. |
+| **Asana** | Prefer the **first-party `asana` MCP** `add_comment` tool (plain text). For rich HTML, or if that MCP isn't connected, fall back to `python3 scripts/asana_ops.py --post-comment <task_gid> '<html>'`. Don't use other Asana MCPs (superseded). |
 | **Shortcut** | MCP if available; else `POST /stories/<story_id>/comments` via `scripts/shortcut_ops.py --post-comment <story_id> '<markdown>'`. |
 | **Linear** | Linear MCP `createComment` with `body: <markdown>`. |
 | **Jira** | `mcp__claude_ai_Atlassian_Rovo__addCommentToJiraIssue` with the assembled body. |

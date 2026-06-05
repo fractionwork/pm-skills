@@ -20,7 +20,7 @@ Audit and fix an Asana project against `docs/asana-best-practices.md`.
 
 Uses `scripts/asana_ops.py` for all operations. The script handles auth (auto-runs OAuth if needed) and provides reusable commands.
 
-> **Fallback rule:** if the Asana MCP is ever missing a capability, disconnected, or returns an error/empty, fall back to `scripts/asana_ops.py` before reporting that something can't be done — it talks to the REST API directly and covers everything the MCP can't (create fields/sections/portfolios/tags, archive, upload files via `--attach-file`). Full command surface in `docs/asana-best-practices.md` → "MCP limitations and the asana_ops.py fallback".
+> **Tool precedence:** prefer the **first-party `asana` MCP** (`scripts/asana_mcp.py`); fall back to **`scripts/asana_ops.py`** for anything it lacks or when disconnected (it covers everything the MCP can't — create fields/sections/portfolios/tags, archive, upload files via `--attach-file`); do **not** use other Asana MCPs (official plugin / community servers are superseded). Full precedence + command surface in `docs/asana-best-practices.md` → "Tool precedence".
 
 ## Step 1: Pick the project
 
