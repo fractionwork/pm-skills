@@ -188,10 +188,22 @@ if ! command -v python3 >/dev/null 2>&1; then
   err "python3 not found — required by asana_ops.py / shortcut_ops.py"
   exit 1
 fi
-ok "python3: $(python3 --version)"
+ok "python3 (CLI scripts): $(python3 --version 2>&1)"
+
+# The Asana MCP server needs Python >= 3.10 (the `mcp` SDK floor). find_py picks
+# that interpreter by name regardless of what bare `python3` resolves to — so
+# report THAT here. Otherwise the line shows the system python3 (often 3.9 on
+# macOS) and looks broken even when a usable 3.12 is installed alongside.
+MCP_PY_PRECHECK="$(find_py || true)"
+if [[ -n "$MCP_PY_PRECHECK" ]]; then
+  ok "python (Asana MCP):   $("$MCP_PY_PRECHECK" --version 2>&1)  [$MCP_PY_PRECHECK]"
+else
+  warn "no Python >= 3.10 found — the Asana MCP needs it (the CLI scripts run fine on 3.9)."
+  warn "    macOS: brew install python@3.12   then re-run this installer."
+fi
 
 if ! python3 -c 'import requests' 2>/dev/null; then
-  warn "Python 'requests' module not installed."
+  warn "Python 'requests' module not installed (used by the CLI scripts)."
   warn "  Install with: pip install --user requests"
 fi
 
