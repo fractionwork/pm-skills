@@ -99,6 +99,12 @@ do_step() {
   fi
 }
 
+# `claude mcp add <name>` refuses with exit 1 if <name> already exists — it does
+# NOT overwrite. Under `set -e` that aborts the installer on any re-run, and it
+# silently blocks re-registering a server to swap its env (e.g. OAuth → PAT).
+# Remove first so every add below is genuinely idempotent. No-op if absent.
+mcp_reset() { do_step "claude mcp remove '$1' >/dev/null 2>&1 || true"; }
+
 echo ""
 echo "Fraction PM Skills installer"
 echo "============================"
@@ -204,6 +210,12 @@ for sys in "${SYSTEMS[@]}"; do
     asana)
       do_step "cp '$BUNDLE_DIR/scripts/asana_ops.py' '$SCRIPTS_DIR/asana_ops.py'"
       ok "script: asana_ops.py"
+      # First-party MCP server + its deps manifest. asana_mcp.py imports
+      # asana_ops.py (above) for auth/REST, so they live side by side.
+      do_step "cp '$BUNDLE_DIR/scripts/asana_mcp.py' '$SCRIPTS_DIR/asana_mcp.py'"
+      ok "script: asana_mcp.py"
+      do_step "cp '$BUNDLE_DIR/scripts/requirements-mcp.txt' '$SCRIPTS_DIR/requirements-mcp.txt'"
+      ok "file: requirements-mcp.txt"
       ;;
     shortcut)
       do_step "cp '$BUNDLE_DIR/scripts/shortcut_ops.py' '$SCRIPTS_DIR/shortcut_ops.py'"
@@ -218,17 +230,37 @@ echo "5. Installing MCP servers + plugins..."
 for sys in "${SYSTEMS[@]}"; do
   case "$sys" in
     asana)
-      # Plugin install is idempotent — second run reports "already installed"
-      # and exits 0. Safe to re-run.
-      do_step "claude plugin install asana"
-      ok "asana plugin: installed (auth on first use inside Claude Code)"
+      # First-party MCP server (scripts/asana_mcp.py) is the preferred Asana
+      # surface — it supports BOTH OAuth (full users) and PAT (guests), and
+      # exposes curated writes (hygiene/comment/assign/move/capture). The
+      # official `asana` plugin registers under the same name and would
+      # collide, so disable it if present (best-effort; no-op otherwise).
+      do_step "claude plugin disable asana 2>/dev/null || true"
+      # Install the server's Python deps (mcp, requests). Best-effort — a
+      # failure here is a warning, not fatal; the user can pip-install later.
+      if [[ $DRY_RUN -eq 1 ]]; then
+        say "(dry-run) python3 -m pip install --user -r '$SCRIPTS_DIR/requirements-mcp.txt'"
+      elif python3 -m pip install --user -r "$SCRIPTS_DIR/requirements-mcp.txt" >/dev/null 2>&1; then
+        ok "MCP deps installed (mcp, requests)"
+      else
+        warn "could not pip-install MCP deps — run: python3 -m pip install --user -r $SCRIPTS_DIR/requirements-mcp.txt"
+      fi
+      # Register as `asana` (mcp_reset makes it idempotent on re-run). Default
+      # wiring is OAuth: ASANA_TOKEN_FILE points at where Step 6's --auth writes
+      # the token store; ASANA_WORKSPACE_FILE honors a saved "pick once" choice
+      # regardless of the server's CWD. Guests who paste a PAT in Step 6 get
+      # re-registered there with ASANA_ACCESS_TOKEN baked in.
+      mcp_reset asana
+      do_step "claude mcp add asana -e ASANA_TOKEN_FILE='$SCRIPTS_DIR/.asana-token.json' -e ASANA_WORKSPACE_FILE='$SCRIPTS_DIR/.asana-workspace.json' -- python3 '$SCRIPTS_DIR/asana_mcp.py'"
+      ok "asana MCP: first-party server registered (auth set up in step 6)"
       ;;
     linear)
-      # MCP add is idempotent on the same name — overwrites silently.
+      mcp_reset linear
       do_step "claude mcp add --transport http linear https://mcp.linear.app/mcp"
       ok "linear MCP: configured (auth on first use)"
       ;;
     jira)
+      mcp_reset atlassian-rovo
       do_step "claude mcp add --transport sse atlassian-rovo https://mcp.atlassian.com/v1/sse"
       ok "atlassian-rovo MCP: configured (auth on first use)"
       ;;
@@ -275,20 +307,22 @@ setup_token() {
 for sys in "${SYSTEMS[@]}"; do
   case "$sys" in
     asana)
-      # Two Asana auth surfaces:
-      #   1. MCP plugin — OAuth via Anthropic's app, on first use inside Claude Code.
-      #      Can't be triggered from the shell; the user grants consent in Claude Code.
-      #   2. asana_ops.py script — PKCE OAuth, browser flow, can run NOW from this
-      #      installer. Token stored in .asana-token.json next to the script.
+      # One Asana auth, shared by the asana_ops.py CLI AND the first-party MCP
+      # (registered in step 5) — the MCP reads the same token store via
+      # ASANA_TOKEN_FILE, so authing here lights up both surfaces.
+      #   • Full user → OAuth: asana_ops.py --auth (PKCE browser flow) writes
+      #     .asana-token.json next to the script. No MCP re-registration needed.
+      #   • Guest/service account → PAT: paste it; we save it for the script
+      #     AND re-register the MCP with it baked in (ASANA_ACCESS_TOKEN).
       echo ""
-      echo "   Asana auth has two surfaces:"
-      echo "     • MCP plugin: granted in Claude Code on first Asana operation (browser OAuth)"
-      echo "     • asana_ops.py script: PKCE OAuth (browser, captures localhost callback)"
+      echo "   Asana auth — pick one:"
+      echo "     • Full user: OAuth browser login (recommended)"
+      echo "     • Guest/service account: paste a Personal Access Token (PAT)"
       echo ""
       if [[ -f "$SCRIPTS_DIR/.asana-token.json" ]]; then
-        say "asana_ops.py: token already present — skipping (delete to re-auth)"
+        say "asana: OAuth token already present — skipping (delete .asana-token.json to re-auth)"
       elif has_tty; then
-        read -rp "   Auth asana_ops.py now? Opens a browser. [Y/n]: " ans </dev/tty
+        read -rp "   Auth via OAuth now? Opens a browser. [Y/n] (n = paste a PAT): " ans </dev/tty
         ans="${ans:-Y}"
         # Pattern match instead of `${ans^^}` — macOS ships bash 3.2 by default
         # (GPLv3 keeps Apple from updating it), and `^^` is bash 4+ only. Without
@@ -299,11 +333,26 @@ for sys in "${SYSTEMS[@]}"; do
             say "(dry-run) python3 '$SCRIPTS_DIR/asana_ops.py' --auth"
           else
             (cd "$SCRIPTS_DIR" && python3 ./asana_ops.py --auth) || \
-              warn "asana_ops.py auth failed — re-run later: python3 $SCRIPTS_DIR/asana_ops.py --auth"
+              warn "OAuth failed — re-run later: python3 $SCRIPTS_DIR/asana_ops.py --auth"
           fi
         else
-          say "Skipped — run later: python3 $SCRIPTS_DIR/asana_ops.py --auth"
-          say "  Or paste a PAT: append ASANA_PAT=<token> to $ENV_FILE"
+          # Guest path: capture a PAT, persist it for the script, and re-register
+          # the MCP with the PAT baked in, replacing the OAuth-wired entry from
+          # step 5. mcp_reset drops that entry first so the env swap takes effect
+          # (claude mcp add won't overwrite an existing name).
+          read -rp "   Paste your Asana PAT (or leave blank to skip): " pat </dev/tty
+          if [[ -n "$pat" ]]; then
+            do_step "touch '$ENV_FILE' && chmod 600 '$ENV_FILE'"
+            do_step "printf 'ASANA_PAT=%s\n' '$pat' >> '$ENV_FILE'"
+            ok "ASANA_PAT saved to $ENV_FILE (script path)"
+            mcp_reset asana
+            do_step "claude mcp add asana -e ASANA_ACCESS_TOKEN='$pat' -e ASANA_WORKSPACE_FILE='$SCRIPTS_DIR/.asana-workspace.json' -- python3 '$SCRIPTS_DIR/asana_mcp.py'"
+            ok "asana MCP: re-registered with your PAT"
+            say "Tip: fence a guest to one project — ask Claude 'list my Asana projects',"
+            say "  then re-add with -e ASANA_ALLOWED_PROJECTS=<gid> (and -e ASANA_READ_ONLY=1 for read-only)."
+          else
+            warn "skipped — run later: python3 $SCRIPTS_DIR/asana_ops.py --auth (OAuth), or add ASANA_PAT=... to $ENV_FILE"
+          fi
         fi
       else
         warn "no terminal — auth later: python3 $SCRIPTS_DIR/asana_ops.py --auth"
@@ -380,7 +429,8 @@ echo "Next:"
 for sys in "${SYSTEMS[@]}"; do
   case "$sys" in
     asana)
-      echo "  • Asana MCP plugin: first MCP operation in Claude Code will open the browser for OAuth"
+      echo "  • Asana: first-party MCP registered as 'asana'. If you skipped auth above,"
+      echo "    run: python3 $SCRIPTS_DIR/asana_ops.py --auth (OAuth) or add ASANA_PAT=... to $ENV_FILE"
       ;;
     linear)
       echo "  • Linear MCP: first MCP operation in Claude Code will prompt for OAuth"

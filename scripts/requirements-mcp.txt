@@ -1,0 +1,6 @@
+# Dependencies for the first-party Asana MCP server (scripts/asana_mcp.py).
+# Install with: pip install -r scripts/requirements-mcp.txt
+#
+# asana_ops.py (reused for auth + REST) also needs `requests`.
+mcp>=1.2.0
+requests>=2.31.0
