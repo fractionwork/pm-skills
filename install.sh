@@ -107,6 +107,22 @@ do_step() {
 # so this also clears any stale local-scope entry from an older installer.)
 mcp_reset() { do_step "claude mcp remove '$1' >/dev/null 2>&1 || true"; }
 
+# The official `mcp` SDK requires Python >= 3.10. Stock macOS and older Xcode
+# Command Line Tools ship python3 = 3.9, where EVERY pip method fails with "no
+# matching distribution" — the #1 cause of "could not install deps" on a Mac.
+# Echo the newest >=3.10 interpreter on PATH (absolute path), or nothing.
+find_py() {
+  local c p
+  for c in python3.13 python3.12 python3.11 python3.10 python3; do
+    command -v "$c" >/dev/null 2>&1 || continue
+    if "$c" -c 'import sys; sys.exit(0 if sys.version_info >= (3,10) else 1)' 2>/dev/null; then
+      command -v "$c"
+      return 0
+    fi
+  done
+  return 1
+}
+
 # Install the MCP server's Python deps and choose the interpreter Claude Code
 # will launch it with (MCP_PYTHON). A dedicated venv is the primary path: it
 # sidesteps PEP 668 "externally-managed-environment" errors — Homebrew and
@@ -117,25 +133,40 @@ MCP_PYTHON="python3"
 install_mcp_deps() {
   local req="$SCRIPTS_DIR/requirements-mcp.txt"
   local venv="$SCRIPTS_DIR/.venv"
+  local py
+  py="$(find_py || true)"
+  if [[ -z "$py" ]]; then
+    MCP_PYTHON="python3"
+    warn "the Asana MCP needs Python >= 3.10, but no such interpreter was found."
+    warn "    macOS:  brew install python@3.12     (then re-run this installer)"
+    warn "    Linux:  install python3.10+ via your package manager, then re-run"
+    warn "  The asana MCP is registered but won't start until Python >= 3.10 + deps exist."
+    return
+  fi
   if [[ $DRY_RUN -eq 1 ]]; then
-    say "(dry-run) python3 -m venv '$venv' && '$venv/bin/pip' install -r '$req'"
+    say "(dry-run) $py -m venv '$venv' && '$venv/bin/pip' install -r '$req'"
     MCP_PYTHON="$venv/bin/python"
     return
   fi
-  if python3 -m venv "$venv" >/dev/null 2>&1 && "$venv/bin/pip" install -q -r "$req" >/dev/null 2>&1; then
+  # Drop any stale/broken venv from a prior run (e.g. one built with old Python).
+  rm -rf "$venv" 2>/dev/null || true
+  if "$py" -m venv "$venv" >/dev/null 2>&1 && "$venv/bin/pip" install -q -r "$req" >/dev/null 2>&1; then
     MCP_PYTHON="$venv/bin/python"
-    ok "MCP deps installed in venv"
-  elif python3 -m pip install --user -q -r "$req" >/dev/null 2>&1; then
-    MCP_PYTHON="python3"
+    ok "MCP deps installed in venv ($("$py" --version 2>&1))"
+    return
+  fi
+  # venv path failed — show the REAL error (don't swallow it), then try user-site.
+  warn "venv install failed; underlying error:"
+  { "$py" -m venv "$venv" && "$venv/bin/pip" install -r "$req"; } 2>&1 | tail -8 | sed 's/^/    /' || true
+  if "$py" -m pip install --user -q -r "$req" >/dev/null 2>&1 \
+     || "$py" -m pip install --user --break-system-packages -q -r "$req" >/dev/null 2>&1; then
+    MCP_PYTHON="$py"
     ok "MCP deps installed (user site)"
-  elif python3 -m pip install --user --break-system-packages -q -r "$req" >/dev/null 2>&1; then
-    MCP_PYTHON="python3"
-    ok "MCP deps installed (user site, --break-system-packages)"
   else
-    MCP_PYTHON="python3"
-    warn "could not install MCP deps automatically. Install them, then re-run:"
-    warn "    python3 -m venv '$venv' && '$venv/bin/pip' install -r '$req'"
-    warn "  The asana MCP is still registered but won't start until deps exist."
+    MCP_PYTHON="$py"
+    warn "could not install MCP deps automatically (see error above)."
+    warn "    Manual: $py -m venv '$venv' && '$venv/bin/pip' install -r '$req'"
+    warn "  The asana MCP is registered but won't start until deps exist."
   fi
 }
 
