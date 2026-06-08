@@ -283,18 +283,25 @@ def capture_inbox_idea(project_gid: str, title: str, description: str,
 
 
 def main():
-    # Fail fast + clearly if no usable credential or unresolved workspace, before
-    # serving. resolve_workspace() enforces the "pick once" rule for multi-
-    # workspace accounts (it can't prompt here — the server is non-interactive).
-    try:
-        ops.get_token()
-        ws = ops.resolve_workspace()
-    except (ops.AsanaAuthError, ops.AsanaWorkspaceError) as e:
-        print(f"asana-mcp: {e}", file=sys.stderr)
+    # A stdio MCP server MUST start serving promptly: Claude Code blocks its own
+    # startup until the server completes the MCP handshake. So do NOT make network
+    # calls here — get_token() can trigger an OAuth refresh and resolve_workspace()
+    # hits the API, and a stalled request (corporate proxy, captive portal, slow
+    # DNS) would hang Claude's startup rather than fail fast. Validate only what is
+    # cheap and LOCAL; real auth/workspace errors surface on the first tool call
+    # (and ops.* now carries HTTP timeouts so even those can't block forever).
+    has_cred = (
+        ops.TOKEN_FILE.exists()
+        or os.environ.get("ASANA_PAT")
+        or os.environ.get("ASANA_ACCESS_TOKEN")
+    )
+    if not has_cred:
+        print("asana-mcp: no Asana credential found — run `asana_ops.py --auth` "
+              "for OAuth, or set ASANA_PAT / ASANA_ACCESS_TOKEN", file=sys.stderr)
         sys.exit(1)
     mode = "read-only" if READ_ONLY else "read-write"
     scope = f"{len(ALLOWED)} project(s)" if ALLOWED else "workspace-wide"
-    print(f"asana-mcp: starting ({mode}, scope={scope}, workspace={ws})", file=sys.stderr)
+    print(f"asana-mcp: starting ({mode}, scope={scope})", file=sys.stderr)
     mcp.run()
 
 

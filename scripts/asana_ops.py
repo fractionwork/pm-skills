@@ -38,6 +38,11 @@ import requests
 
 # ── Config ──
 BASE = "https://app.asana.com/api/1.0"
+# All network calls carry a timeout so a stalled connection (corporate proxy,
+# captive portal, DNS hang) can never block forever — critical when this module
+# is imported by the stdio MCP server, where a hang stalls Claude Code's startup.
+HTTP_TIMEOUT = 30      # token exchange + REST calls
+UPLOAD_TIMEOUT = 120   # attachment uploads (larger payloads)
 # Fraction DevHawk OAuth app — hardcoded like GitHub CLI does.
 # Client ID is public by design; client secret is required by Asana's
 # token exchange but is not truly secret in a CLI (source is readable).
@@ -172,7 +177,7 @@ def oauth_auth():
         "code": auth_code[0],
         "code_verifier": verifier,
     }
-    resp = requests.post(ASANA_TOKEN_URL, data=token_data)
+    resp = requests.post(ASANA_TOKEN_URL, data=token_data, timeout=HTTP_TIMEOUT)
     if resp.status_code != 200:
         print(f"Token exchange failed: {resp.status_code} {resp.text}")
         sys.exit(1)
@@ -199,7 +204,7 @@ def refresh_token():
         "client_id": client_id,
         "client_secret": ASANA_CLIENT_SECRET,
         "refresh_token": tokens["refresh_token"],
-    })
+    }, timeout=HTTP_TIMEOUT)
     if resp.status_code != 200:
         print(f"Token refresh failed: {resp.status_code}. Re-run --auth.")
         return None
@@ -320,7 +325,8 @@ def api(method, path, data=None, params=None, dry_run=False):
     token = get_token()
     headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
     resp = requests.request(method, url, headers=headers,
-                            json={"data": data} if data else None, params=params)
+                            json={"data": data} if data else None, params=params,
+                            timeout=HTTP_TIMEOUT)
 
     # Rate limit handling
     if resp.status_code == 429:
@@ -401,6 +407,7 @@ def attach_file(task_gid, file_path, dry_run=False):
             headers={"Authorization": f"Bearer {token}"},
             data={"parent": task_gid},
             files={"file": (path.name, fh)},
+            timeout=UPLOAD_TIMEOUT,
         )
 
     if resp.status_code == 429:
