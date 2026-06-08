@@ -103,7 +103,41 @@ do_step() {
 # NOT overwrite. Under `set -e` that aborts the installer on any re-run, and it
 # silently blocks re-registering a server to swap its env (e.g. OAuth → PAT).
 # Remove first so every add below is genuinely idempotent. No-op if absent.
+# (`claude mcp remove` with no scope removes from whichever scope it exists in,
+# so this also clears any stale local-scope entry from an older installer.)
 mcp_reset() { do_step "claude mcp remove '$1' >/dev/null 2>&1 || true"; }
+
+# Install the MCP server's Python deps and choose the interpreter Claude Code
+# will launch it with (MCP_PYTHON). A dedicated venv is the primary path: it
+# sidesteps PEP 668 "externally-managed-environment" errors — Homebrew and
+# Debian/Ubuntu system Python refuse `pip install` — AND guarantees the exact
+# interpreter we register has the deps. Falls back to user-site installs, then
+# warns (registration still happens so the server is at least visible in /mcp).
+MCP_PYTHON="python3"
+install_mcp_deps() {
+  local req="$SCRIPTS_DIR/requirements-mcp.txt"
+  local venv="$SCRIPTS_DIR/.venv"
+  if [[ $DRY_RUN -eq 1 ]]; then
+    say "(dry-run) python3 -m venv '$venv' && '$venv/bin/pip' install -r '$req'"
+    MCP_PYTHON="$venv/bin/python"
+    return
+  fi
+  if python3 -m venv "$venv" >/dev/null 2>&1 && "$venv/bin/pip" install -q -r "$req" >/dev/null 2>&1; then
+    MCP_PYTHON="$venv/bin/python"
+    ok "MCP deps installed in venv"
+  elif python3 -m pip install --user -q -r "$req" >/dev/null 2>&1; then
+    MCP_PYTHON="python3"
+    ok "MCP deps installed (user site)"
+  elif python3 -m pip install --user --break-system-packages -q -r "$req" >/dev/null 2>&1; then
+    MCP_PYTHON="python3"
+    ok "MCP deps installed (user site, --break-system-packages)"
+  else
+    MCP_PYTHON="python3"
+    warn "could not install MCP deps automatically. Install them, then re-run:"
+    warn "    python3 -m venv '$venv' && '$venv/bin/pip' install -r '$req'"
+    warn "  The asana MCP is still registered but won't start until deps exist."
+  fi
+}
 
 echo ""
 echo "Fraction PM Skills installer"
@@ -233,35 +267,29 @@ for sys in "${SYSTEMS[@]}"; do
       # First-party MCP server (scripts/asana_mcp.py) is the preferred Asana
       # surface — it supports BOTH OAuth (full users) and PAT (guests), and
       # exposes curated writes (hygiene/comment/assign/move/capture). The
-      # official `asana` plugin registers under the same name and would
-      # collide, so disable it if present (best-effort; no-op otherwise).
+      # official `asana` plugin offers an overlapping Asana tool surface, so
+      # disable it if present for one unambiguous surface (best-effort, no-op
+      # otherwise).
       do_step "claude plugin disable asana 2>/dev/null || true"
-      # Install the server's Python deps (mcp, requests). Best-effort — a
-      # failure here is a warning, not fatal; the user can pip-install later.
-      if [[ $DRY_RUN -eq 1 ]]; then
-        say "(dry-run) python3 -m pip install --user -r '$SCRIPTS_DIR/requirements-mcp.txt'"
-      elif python3 -m pip install --user -r "$SCRIPTS_DIR/requirements-mcp.txt" >/dev/null 2>&1; then
-        ok "MCP deps installed (mcp, requests)"
-      else
-        warn "could not pip-install MCP deps — run: python3 -m pip install --user -r $SCRIPTS_DIR/requirements-mcp.txt"
-      fi
-      # Register as `asana` (mcp_reset makes it idempotent on re-run). Default
-      # wiring is OAuth: ASANA_TOKEN_FILE points at where Step 6's --auth writes
-      # the token store; ASANA_WORKSPACE_FILE honors a saved "pick once" choice
-      # regardless of the server's CWD. Guests who paste a PAT in Step 6 get
-      # re-registered there with ASANA_ACCESS_TOKEN baked in.
+      install_mcp_deps
+      # Register at USER scope so the server appears in /mcp across every project.
+      # The default `local` scope keys to the install CWD — a temp clone dir on
+      # the curl-pipe path — so a local-scoped server vanishes when that dir is
+      # cleaned up. mcp_reset keeps re-runs idempotent. Default wiring is OAuth
+      # (ASANA_TOKEN_FILE = where Step 6's --auth writes the token store);
+      # ASANA_WORKSPACE_FILE honors a saved "pick once" choice regardless of CWD.
       mcp_reset asana
-      do_step "claude mcp add asana -e ASANA_TOKEN_FILE='$SCRIPTS_DIR/.asana-token.json' -e ASANA_WORKSPACE_FILE='$SCRIPTS_DIR/.asana-workspace.json' -- python3 '$SCRIPTS_DIR/asana_mcp.py'"
-      ok "asana MCP: first-party server registered (auth set up in step 6)"
+      do_step "claude mcp add asana --scope user -e ASANA_TOKEN_FILE='$SCRIPTS_DIR/.asana-token.json' -e ASANA_WORKSPACE_FILE='$SCRIPTS_DIR/.asana-workspace.json' -- '$MCP_PYTHON' '$SCRIPTS_DIR/asana_mcp.py'"
+      ok "asana MCP: first-party server registered at user scope (auth in step 6)"
       ;;
     linear)
       mcp_reset linear
-      do_step "claude mcp add --transport http linear https://mcp.linear.app/mcp"
+      do_step "claude mcp add --scope user --transport http linear https://mcp.linear.app/mcp"
       ok "linear MCP: configured (auth on first use)"
       ;;
     jira)
       mcp_reset atlassian-rovo
-      do_step "claude mcp add --transport sse atlassian-rovo https://mcp.atlassian.com/v1/sse"
+      do_step "claude mcp add --scope user --transport sse atlassian-rovo https://mcp.atlassian.com/v1/sse"
       ok "atlassian-rovo MCP: configured (auth on first use)"
       ;;
     shortcut)
@@ -346,7 +374,7 @@ for sys in "${SYSTEMS[@]}"; do
             do_step "printf 'ASANA_PAT=%s\n' '$pat' >> '$ENV_FILE'"
             ok "ASANA_PAT saved to $ENV_FILE (script path)"
             mcp_reset asana
-            do_step "claude mcp add asana -e ASANA_ACCESS_TOKEN='$pat' -e ASANA_WORKSPACE_FILE='$SCRIPTS_DIR/.asana-workspace.json' -- python3 '$SCRIPTS_DIR/asana_mcp.py'"
+            do_step "claude mcp add asana --scope user -e ASANA_ACCESS_TOKEN='$pat' -e ASANA_WORKSPACE_FILE='$SCRIPTS_DIR/.asana-workspace.json' -- '$MCP_PYTHON' '$SCRIPTS_DIR/asana_mcp.py'"
             ok "asana MCP: re-registered with your PAT"
             say "Tip: fence a guest to one project — ask Claude 'list my Asana projects',"
             say "  then re-add with -e ASANA_ALLOWED_PROJECTS=<gid> (and -e ASANA_READ_ONLY=1 for read-only)."
