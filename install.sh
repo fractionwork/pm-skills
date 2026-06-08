@@ -202,9 +202,23 @@ else
   warn "    macOS: brew install python@3.12   then re-run this installer."
 fi
 
-if ! python3 -c 'import requests' 2>/dev/null; then
-  warn "Python 'requests' module not installed (used by the CLI scripts)."
-  warn "  Install with: pip install --user requests"
+# asana_ops.py / shortcut_ops.py do `import requests` and run under the DEFAULT
+# python3 — both by `--auth` below and by the skills at runtime — so requests
+# must be importable THERE, not just in the MCP venv. Install it if missing,
+# with a PEP 668 fallback (Homebrew / Debian system Python block plain installs,
+# which is exactly the "ModuleNotFoundError: No module named 'requests'" a PM hit
+# after switching their default python to a fresh Homebrew build).
+if python3 -c 'import requests' 2>/dev/null; then
+  ok "python 'requests': present"
+elif [[ $DRY_RUN -eq 1 ]]; then
+  say "(dry-run) python3 -m pip install --user requests  (|| --break-system-packages)"
+elif python3 -m pip install --user -q requests >/dev/null 2>&1 \
+  || python3 -m pip install --break-system-packages -q requests >/dev/null 2>&1; then
+  ok "python 'requests': installed for $(command -v python3)"
+else
+  warn "could not install 'requests' for $(command -v python3) — the asana/shortcut"
+  warn "  CLI scripts will fail with ModuleNotFoundError. Install it manually:"
+  warn "    python3 -m pip install --user requests    (or --break-system-packages)"
 fi
 
 # Pre-create the Claude Code home and its standard subdirs so the rest of
