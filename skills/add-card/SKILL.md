@@ -24,7 +24,7 @@ The canonical hygiene rules live in `docs/asana-best-practices.md` and `.claude/
 
 ## Step 1: Resolve the target project
 
-If the user names the project ("add a ticket to ELEVAT3 about X"), resolve it via Asana MCP `asana_typeahead_search` (or Shortcut/Linear equivalent).
+If the user names the project ("add a ticket to ELEVAT3 about X"), resolve it via our MCP `mcp__asana__list_projects` and match by name (or `python3 scripts/asana_ops.py --list-projects`; Shortcut/Linear equivalents for those systems).
 
 If the user is ambiguous ("add a ticket about X"), check `.devhawk-work.json` for the active project. If still unclear, ask: "Which project — ELEVAT3, Paryani Construction, …?"
 
@@ -53,7 +53,7 @@ Before any field validation or creation, **search the target project for likely 
 
 ### Searching
 
-For **Asana**: `asana_search_tasks` against the resolved project with the proposed title's significant tokens (drop stopwords: a/the/and/of/to/for/on/in/with/is/are). Take top ~10 hits.
+For **Asana**: `mcp__asana__search_tasks` against the resolved project with the proposed title's significant tokens (drop stopwords: a/the/and/of/to/for/on/in/with/is/are). Take top ~10 hits.
 
 For **Shortcut**: search the project's stories via MCP, same token approach. Filter to non-archived, non-completed stories.
 
@@ -103,7 +103,7 @@ Always quote at least one specific signal in the reasoning — vague "looks simi
 
 **(a) Update existing card** — call into the same source-attribution machinery as Step 6:
 
-1. Append a comment on the existing card via `asana_create_task_story` (or Shortcut/Linear equivalent). Format:
+1. Append a comment on the existing card via `mcp__asana__add_comment` (or Shortcut/Linear equivalent). Format:
    ```
    [ADDITIONAL CONTEXT 2026-MM-DD from <source>]
    <the new context the user provided — a quote, a snippet, or the original ask verbatim>
@@ -159,7 +159,7 @@ For **INBOX cards specifically**: skip Priority / Task Type / Story Points / Rel
 
 ## Step 5: Create the card
 
-Asana: `asana_create_task` with `name`, `notes`, `projects`, `memberships=[{project, section}]` (BACKLOG or INBOX), `custom_fields` (only the ones required for the target section per Step 4, **including `Feature`**). Sprint goes via PUT after creation since `asana_create_task` may not accept multi_enum on create.
+Asana: `python3 scripts/asana_ops.py --create-task '<json>'` (or pipe the spec with `--create-task -`). The spec carries `name`, `notes`, `projects` (the resolved project gid), `section` (`"BACKLOG"` or `"INBOX"` — resolved within the project), `custom_fields` (`{field_gid: value}` — only those required for the target section per Step 4, **including `Feature`**), `sprint` (`[enum_option_gid]` — applied via a follow-up PUT since multi_enum can't be set on create), and `audit_tag: true` (stamps Marker A — see Step 6.5 — automatically). One call creates the task, places it in the section, applies the fields, and tags it; it prints `{ok, task_gid, permalink, warnings}`. The curated `asana` MCP **deliberately omits raw task creation** (it exposes only `capture_inbox_idea` for light INBOX capture), so rich BACKLOG creation runs through the script — still first-party, never a third-party Asana MCP.
 
 **Always top-level — never pass `parent`.** The flat-task policy (`docs/asana-best-practices.md` → "Task structure") forbids subtasks for workflow items: Asana can't move a subtask between board sections, so it would be stuck off the board forever. The epic association is carried by the **`Feature`** field, not by nesting. If you ever need to relate a card to an epic definition card, set matching `Feature` values — do not set `parent`. (Legacy subtasks found in a project are elevated with `python3 scripts/asana_ops.py --elevate-subtasks <PROJECT_GID>`.)
 
@@ -168,7 +168,7 @@ Asana: `asana_create_task` with `name`, `notes`, `projects`, `memberships=[{proj
 Per `feedback_pm_source_attribution.md` and `asana-hygiene` Step 7 — **two-step rule, always**:
 
 1. Description includes a `Source: …` line at the bottom (per the format library in `asana-hygiene` Step 7).
-2. Post a comment on the new card via `asana_create_task_story` (or Shortcut/Linear equivalent) quoting the specific source content.
+2. Post a comment on the new card via `mcp__asana__add_comment` (plain text), or `python3 scripts/asana_ops.py --post-comment <gid> '<body>...</body>'` for rich HTML — quoting the specific source content. (Shortcut/Linear equivalents for those systems.)
 
 Even when the user says "I just thought of this" — record it: `Source: ad-hoc — user request 2026-04-27`. The trail's value is consistency, not just provenance. **For INBOX cards this rule is non-negotiable** — without source attribution, an INBOX item is just untraced noise.
 
@@ -182,7 +182,7 @@ Attach the well-known label `devhawk:add-card` to the new card. If the label/tag
 
 | System | How |
 |---|---|
-| **Asana** | Workspace-level tag (`POST /workspaces/<ws_gid>/tags` if missing, then `POST /tasks/<gid>/addTag` per card). The MCP can attach an existing tag but cannot create new workspace tags — run `python3 scripts/asana_ops.py --ensure-audit-tag` once per workspace; the script is idempotent and prints the tag gid. Cache the gid in `.devhawk-work.json` for reuse. |
+| **Asana** | Handled automatically by Step 5: `--create-task` stamps the tag when `audit_tag: true` (the default) — it ensures the workspace tag exists, then attaches it. To (re)create the tag standalone, run `python3 scripts/asana_ops.py --ensure-audit-tag` (idempotent; prints the gid). The curated MCP can attach an existing tag but cannot create workspace tags, which is why this lives in the script. Cache the gid in `.devhawk-work.json` for reuse. |
 | **Shortcut** | Label (workspace-level). Just include `labels: [{name: "devhawk:add-card", color: "#0E8A16"}]` on story creation — Shortcut auto-creates the label on first use and attaches an existing one by name afterward. No setup script needed. |
 | **Linear** | Issue label. Linear's MCP can create labels directly — call `linear.createIssueLabel({ name: "devhawk:add-card", color: "#0E8A16" })` if missing, then include the label id on creation. |
 

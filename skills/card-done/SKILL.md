@@ -24,7 +24,7 @@ If `.devhawk-work.json` is missing or empty (typical for PMs working without a c
 
 Resolve the response:
 
-- **URL or GID** — extract the id and look up the card via the matching MCP (`asana_get_task`, Shortcut/Linear/Jira equivalents) to confirm it exists and capture the project context.
+- **URL or GID** — extract the id and look up the card via the matching MCP (`mcp__asana__get_task`, Shortcut/Linear/Jira equivalents) to confirm it exists and capture the project context.
 - **Search term** — search the user's recent assigned/active cards across the connected PM systems; show the top 5 with permalinks; ask which one. Don't guess if more than one matches.
 
 Once resolved, hold the card record in memory for the rest of the steps. Skip Step 2's PR check (see below) when the user is closing a non-dev card — there may be no PR to inspect.
@@ -76,22 +76,21 @@ Order of operations:
 ### Asana (top-level task)
 
 ```
-# Step 1: Move to target section
-POST /sections/<sectionId>/addTask  body: {"data":{"task":"<cardId>"}}
-# (use $(python3 scripts/asana_ops.py --token) as bearer)
+# Step 1: Move to target section (by name — resolved within the card's project)
+mcp__asana__move_task_to_section(task_gid="<cardId>", section="<SECTION NAME>")
 
 # Step 2: Verify
-GET /tasks/<cardId>?opt_fields=memberships.section.gid,memberships.section.name
+mcp__asana__get_task(task_gid="<cardId>")   # confirm memberships[*].section.name == target
 
-# Step 3: ONLY if section == DONE
-update_tasks([{ task: cardId, completed: true }])
+# Step 3: ONLY if section == DONE (the curated MCP omits completion by design)
+python3 scripts/asana_ops.py --complete-task <cardId>
 ```
 
 If destination is RFT, the card stays `completed: false` until QA closes it (separate flow).
 
 ### Asana (epic rollup via the Feature field)
 
-Every task is top-level (flat-task policy) — there are no subtask siblings. The epic is the task's `Feature` value. After the task is verified in DONE and marked complete, optionally roll the epic up: query the other incomplete tasks sharing the same `Feature` (`asana_search_tasks` / `asana_get_tasks` filtered by the Feature value).
+Every task is top-level (flat-task policy) — there are no subtask siblings. The epic is the task's `Feature` value. After the task is verified in DONE and marked complete, optionally roll the epic up: query the other incomplete tasks sharing the same `Feature` (`mcp__asana__search_tasks` / `mcp__asana__list_project_tasks`, filtered by the Feature value).
 - None left incomplete → if an `EPIC`-typed definition card exists for that Feature, move it to DONE and mark `completed: true` (move first, verify, then complete).
 - Some still incomplete → comment on the EPIC definition card (if any): "[title] completed. [N] of [M] Feature tasks remaining." Do NOT touch the epic card's state.
 

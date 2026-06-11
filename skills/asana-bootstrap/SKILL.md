@@ -45,7 +45,8 @@ If the request was terse ("create a board called ELEVAT4"), ask once for descrip
 Before creating anything, search the workspace for an existing project with a similar name.
 
 ```
-asana_typeahead_search type=project query="<proposed name's significant tokens>"
+mcp__asana__list_projects          # then match by the proposed name's significant tokens
+# (or: python3 scripts/asana_ops.py --list-projects)
 ```
 
 Reuse `add-card` Step 2.5's signal model (significant-token overlap ≥50%, substring containment, same domain noun, same client/customer prefix). One signal alone is noise; two or more → surface as a likely duplicate.
@@ -73,15 +74,17 @@ When no candidates score, state explicitly: "No matching projects in `<workspace
 
 ## Step 3: Create the project
 
-Use Asana MCP — it has the right confirm-step UX:
+Project creation isn't on the curated MCP (it omits structural mutations by design), so it runs through the script — still first-party. Get a confirm step by previewing with `--dry-run` first:
 
 ```
-asana_create_project_preview     name=<name> workspace=<gid> team=<gid>
-                                 notes=<description> layout=board
-asana_create_project_confirm     <preview_id>
+# 1. Preview — prints the exact payload, creates nothing:
+python3 scripts/asana_ops.py --create-project '{"name":"<name>","team":"<team_gid>","notes":"<description>","default_view":"board"}' --dry-run
+
+# 2. Show the user the preview, get the OK, then run live (drop --dry-run):
+python3 scripts/asana_ops.py --create-project '{"name":"<name>","team":"<team_gid>","notes":"<description>","default_view":"board"}'
 ```
 
-After confirm returns the new `project_gid`, capture it. Everything from Step 4 onward needs it.
+`--create-project` defaults `workspace` to the active one (override with a `"workspace"` key). It prints `{ok, project_gid, permalink}` — capture `project_gid`. Everything from Step 4 onward needs it.
 
 If the workspace has standard project templates, **do not use them** — they ship with non-Fraction sections and fields that hygiene would then have to undo. The seed's standards are applied in Steps 4–6 directly.
 
@@ -117,7 +120,7 @@ api('PUT', '/projects/<PROJECT_GID>', {
 "
 ```
 
-(Or call directly through Asana MCP if a single-field write is simpler — but batch the three fields into one PUT to avoid three separate redraws of the project page.)
+(Batch the three fields into one PUT to avoid three separate redraws of the project page. Project metadata writes aren't on the curated MCP, so this uses our `api()` helper directly — still first-party, no third-party Asana MCP.)
 
 If the user didn't supply `due_on`, leave it unset and **flag it in the final report** as the one outstanding manual TODO. Don't auto-pick "+90 days" or similar — that's a fake commitment that confuses portfolio rollups.
 
@@ -161,8 +164,11 @@ For the tasks that belong to each EPIC, defer to `add-card` (or batch via `asana
 If the workspace uses portfolios for product or client grouping (Fraction convention per `docs/asana-best-practices.md` → "Portfolio organization"), add the new project:
 
 ```bash
-# Asana MCP can do this in one call:
-asana_add_project_to_portfolio  portfolio_gid=<gid> project_gid=<PROJECT_GID>
+# Not on the curated MCP — use the api() helper (POST /portfolios/<gid>/addItem):
+python3 -c "
+from scripts.asana_ops import api
+api('POST', '/portfolios/<PORTFOLIO_GID>/addItem', {'item': '<PROJECT_GID>'})
+"
 ```
 
 Ask once which portfolio if multiple are plausible. If the user doesn't know or there's no clear match, skip and flag it as a TODO in the final report.

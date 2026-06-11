@@ -198,7 +198,7 @@ How would you like to handle this?
   (4) **Defer** — skip; surface again on next hygiene run.
 ```
 
-**Bulk-mute notification rule applies** (per Step 5 → "Bulk operations"): when merging >5 pairs in one session, suppress assignee/follower notifications on the close side (`asana_update_task` with `silent=true` is not yet supported — instead, post the merge comment, then close the duplicate via REST PUT to avoid Inbox spam for watchers).
+**Bulk-mute notification rule applies** (per Step 5 → "Bulk operations"): when merging >5 pairs in one session, suppress assignee/follower notifications on the close side. Neither our `asana` MCP nor `asana_ops.py` exposes a `silent` flag yet — so post the merge comment first, then close the duplicate with `python3 scripts/asana_ops.py --complete-task <gid>`, accepting that watchers may still see the close in their Inbox.
 
 Always quote at least one specific signal — vague "looks similar" produces noise the user can't act on.
 
@@ -213,7 +213,7 @@ Report explicitly: "No likely duplicate pairs in `<project>`." This confirms the
 ### The two-step rule
 
 1. **Edit the description** with a `Source: …` line so the attribution travels with the artifact.
-2. **Post a comment** via `asana_create_task_story` quoting the specific evidence. Descriptions get rewritten; comments are an immutable audit trail.
+2. **Post a comment** via `mcp__asana__add_comment` (plain text), or `python3 scripts/asana_ops.py --post-comment <gid> '<body>...</body>'` for rich HTML, quoting the specific evidence. Descriptions get rewritten; comments are an immutable audit trail.
 
 Both steps are required. Skipping the comment is the most common failure mode — don't.
 

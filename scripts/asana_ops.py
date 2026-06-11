@@ -1526,6 +1526,144 @@ def write_report(results):
 
 
 # ═══════════════════════════════════════════════════════
+# Skill-facing CLI verbs
+# ═══════════════════════════════════════════════════════
+# Thin wrappers over api()/paginate() that give the skills (add-card, card-done,
+# add-comment, asana-bootstrap) a first-party home for the operations the curated
+# asana_mcp.py server deliberately omits — raw create, complete, user lookup,
+# project create. This keeps EVERY Asana write inside our own tooling; no
+# third-party Asana MCP is ever required. I/O is JSON-in / JSON-out so a skill
+# can pipe a spec and parse the result.
+
+def _read_json_arg(arg):
+    """A JSON spec passed inline, or read from stdin when arg == '-'."""
+    raw = sys.stdin.read() if arg == "-" else arg
+    try:
+        return json.loads(raw)
+    except json.JSONDecodeError as e:
+        print(f"  ✗ invalid JSON: {e}", file=sys.stderr)
+        sys.exit(1)
+
+
+def _resolve_section_gid(project_gid, section):
+    """Section name (case-insensitive) or numeric gid → section gid.
+    Raises ValueError when a named section isn't found in the project."""
+    if str(section).isdigit():
+        return str(section)
+    secs = paginate(f"/projects/{project_gid}/sections", opt_fields="name")
+    match = next((s for s in secs
+                  if (s.get("name") or "").strip().lower() == str(section).strip().lower()), None)
+    if not match:
+        names = ", ".join((s.get("name") or "?") for s in secs)
+        raise ValueError(f"section {section!r} not found in project {project_gid}. Available: {names}")
+    return match["gid"]
+
+
+def create_task(spec, dry_run=False):
+    """Create a top-level task (flat-task policy — never a subtask). `spec` keys:
+    name (req), notes, projects (list, req), section (name/gid within the first
+    project), custom_fields (dict gid→value, applied on create), sprint (list of
+    enum-option gids, applied via a follow-up PUT since multi_enum can't always
+    be set on create), audit_tag (bool, default True → stamp the
+    devhawk:add-card tag). Prints a JSON result."""
+    name = spec.get("name")
+    projects = spec.get("projects") or []
+    if not name or not projects:
+        print('  ✗ --create-task requires "name" and a non-empty "projects" list', file=sys.stderr)
+        sys.exit(1)
+    payload = {"name": name, "projects": projects}
+    if spec.get("notes"):
+        payload["notes"] = spec["notes"]
+    if spec.get("custom_fields"):
+        payload["custom_fields"] = spec["custom_fields"]
+    if dry_run:
+        print(json.dumps({"ok": True, "dry_run": True, "would_create": payload}))
+        return
+    created = api("POST", "/tasks", payload)
+    if not created or not isinstance(created.get("data"), dict):
+        print(json.dumps({"ok": False, "error": "create failed"}))
+        sys.exit(1)
+    gid = created["data"]["gid"]
+    # The card now exists — every follow-up is best-effort so a later failure
+    # reports a warning rather than losing the card.
+    warnings = []
+    if spec.get("section"):
+        try:
+            sec_gid = _resolve_section_gid(projects[0], spec["section"])
+            api("POST", f"/sections/{sec_gid}/addTask", {"task": gid})
+        except ValueError as e:
+            warnings.append(str(e))
+    if spec.get("sprint"):
+        if not api("PUT", f"/tasks/{gid}", {"custom_fields": {SPRINT_FIELD_GID: spec["sprint"]}}):
+            warnings.append("sprint not applied")
+    if spec.get("audit_tag", True):
+        try:
+            tag = ensure_audit_tag()
+            if tag:
+                api("POST", f"/tasks/{gid}/addTag", {"tag": tag})
+            else:
+                warnings.append("audit tag unavailable — footer marker still applies")
+        except Exception as e:  # noqa: BLE001 — best-effort, surfaced in result
+            warnings.append(f"audit tag skipped: {e}")
+    print(json.dumps({"ok": True, "task_gid": gid,
+                      "permalink": f"https://app.asana.com/0/{projects[0]}/{gid}",
+                      "warnings": warnings}))
+
+
+def complete_task(task_gid, dry_run=False):
+    """Mark a task complete. (The curated MCP omits completion deliberately;
+    card-done drives it here.)"""
+    r = api("PUT", f"/tasks/{task_gid}", {"completed": True}, dry_run=dry_run)
+    print("OK" if r else "FAILED")
+    if not r and not dry_run:
+        sys.exit(1)
+
+
+def find_user(query):
+    """Find workspace users matching `query` (substring of name or email,
+    case-insensitive). Prints gid<TAB>name<TAB>email per match — used by the
+    add-comment skill to resolve @mentions to user GIDs."""
+    ws = resolve_workspace()
+    q = query.strip().lower()
+    matches = [u for u in paginate(f"/workspaces/{ws}/users", opt_fields="name,email")
+               if q in (u.get("name") or "").lower() or q in (u.get("email") or "").lower()]
+    if not matches:
+        print(f"  ✗ no user matches {query!r} in workspace {ws}", file=sys.stderr)
+        sys.exit(1)
+    for u in matches:
+        print(f"{u['gid']}\t{u.get('name', '?')}\t{u.get('email', '')}")
+
+
+def create_project(spec, dry_run=False):
+    """Create a project (asana-bootstrap). `spec` keys: name (req), team (gid —
+    required for org workspaces), workspace (gid; defaults to the active one),
+    notes, public (bool), default_view. Prints a JSON result with the new
+    project gid."""
+    name = spec.get("name")
+    if not name:
+        print('  ✗ --create-project requires "name"', file=sys.stderr)
+        sys.exit(1)
+    payload = {"name": name, "workspace": spec.get("workspace") or resolve_workspace()}
+    if spec.get("team"):
+        payload["team"] = spec["team"]
+    for k in ("notes", "default_view"):
+        if spec.get(k):
+            payload[k] = spec[k]
+    if "public" in spec:
+        payload["public"] = bool(spec["public"])
+    if dry_run:
+        print(json.dumps({"ok": True, "dry_run": True, "would_create": payload}))
+        return
+    created = api("POST", "/projects", payload)
+    if not created or not isinstance(created.get("data"), dict):
+        print(json.dumps({"ok": False, "error": "create failed"}))
+        sys.exit(1)
+    gid = created["data"]["gid"]
+    print(json.dumps({"ok": True, "project_gid": gid,
+                      "permalink": f"https://app.asana.com/0/{gid}"}))
+
+
+# ═══════════════════════════════════════════════════════
 # Main
 # ═══════════════════════════════════════════════════════
 
@@ -1546,6 +1684,10 @@ def main():
     parser.add_argument("--elevate-subtasks", metavar="PROJECT_GID", help="Flat-task fix: promote every subtask in PROJECT_GID to a top-level task (addProject+section, then setParent null), copy the parent's Feature/Theme onto each child, keep the parent EPIC card. Idempotent; repairs dual state.")
     parser.add_argument("--post-comment", nargs="+", metavar="TASK_GID", help="Post a comment on a task. Pass HTML as the second arg, or '-' to read HTML from stdin. Example: --post-comment 1234 '<body><p>hello</p></body>' or echo '<body>...</body>' | --post-comment 1234 -")
     parser.add_argument("--attach-file", nargs=2, metavar=("TASK_GID", "FILE_PATH"), help="Upload a local file as an attachment on a task (fills the MCP gap — MCP can't upload local files). Asana caps a single attachment at 100MB.")
+    parser.add_argument("--create-task", metavar="JSON", help="Create a top-level task from a JSON spec (or '-' for stdin). Keys: name, notes, projects[], section, custom_fields{gid:val}, sprint[opt_gid], audit_tag(bool). Covers add-card's rich BACKLOG/INBOX creation — the surface the curated MCP omits. Prints JSON {ok,task_gid,permalink,warnings}.")
+    parser.add_argument("--complete-task", metavar="TASK_GID", help="Mark a task complete (used by card-done; the curated MCP omits completion).")
+    parser.add_argument("--find-user", metavar="QUERY", help="Find workspace users by name/email substring; prints gid<TAB>name<TAB>email. Used by add-comment to resolve @mentions.")
+    parser.add_argument("--create-project", metavar="JSON", help="Create a project from a JSON spec (or '-' for stdin). Keys: name, team, workspace, notes, public, default_view. Used by asana-bootstrap. Prints JSON {ok,project_gid,permalink}.")
     parser.add_argument("--ensure-audit-tag", action="store_true", help=f"Idempotent: ensure the workspace-level '{ADD_CARD_AUDIT_TAG_NAME}' tag exists; prints its gid. Used by the add-card skill to stamp skill-created cards.")
     parser.add_argument("--list-workspaces", action="store_true", help="List the account's Asana workspaces (gid + name).")
     parser.add_argument("--set-workspace", metavar="WORKSPACE_GID", help="Persist the active workspace choice (for multi-workspace accounts). Both the CLI and the MCP server reuse it.")
@@ -1628,6 +1770,22 @@ def main():
 
     if args.attach_file:
         attach_file(args.attach_file[0], args.attach_file[1], args.dry_run)
+        return
+
+    if args.create_task:
+        create_task(_read_json_arg(args.create_task), args.dry_run)
+        return
+
+    if args.complete_task:
+        complete_task(args.complete_task, args.dry_run)
+        return
+
+    if args.find_user:
+        find_user(args.find_user)
+        return
+
+    if args.create_project:
+        create_project(_read_json_arg(args.create_project), args.dry_run)
         return
 
     if args.list_workspaces:
