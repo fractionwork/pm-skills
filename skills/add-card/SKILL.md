@@ -1,5 +1,6 @@
 ---
 name: add-card
+profiles: [pm, engineer]
 description: >
   REQUIRED for any single-card creation in an existing PM project — do NOT call
   PM MCP `create_task*` / `create_story` / `create_issue` directly; invoke this

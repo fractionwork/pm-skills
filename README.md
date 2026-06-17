@@ -1,147 +1,90 @@
-# Fraction PM Skills
+# Fraction DevHawk Skills
 
-A small bundle of Claude Code skills + scripts for managing PM cards on Asana, Shortcut, Linear, and Jira — extracted from the [DevHawk seed](https://github.com/fractionwork/devhawk-seed) (Fraction's full engineering reference stack) for use by Project / Product Managers who don't need the dev tooling.
+Claude Code skills, scripts, agents, and MCP wiring for Fraction's workflow —
+board/PM management and (for engineers) PR/fix-merge, build/test, and ops —
+installed at the **user level** (`~/.claude/`) so they're consistent across every
+project and update in one place.
 
-## What's in here
+> This repo is **auto-built** from the [DevHawk seed](https://github.com/fractionwork/devhawk-seed)
+> (Fraction's engineering reference stack) by CI on every change. Don't edit it
+> directly — edits here are overwritten on the next publish. See the seed's
+> `docs/seed-distribution.md` for the full two-tier distribution model.
 
-| Component | Purpose |
-|---|---|
-| `add-card` skill | Create a new top-level card with all Fraction hygiene rules applied at creation time (sections, fields, Feature, source attribution, duplicate detection) |
-| `add-comment` skill | Post a comment on a card; converts Markdown to each system's accepted format (Asana's HTML allowlist is enforced — no more silent 400s) |
-| `card-done` skill | Close a card with a summary comment; supports both dev-flavored and PM-flavored manual closeouts |
-| `asana-bootstrap` skill | Create a new Asana project born compliant — required admins, 8 standard custom fields (incl. Theme + Feature), 8 standard sections (INBOX → DONE), initial Release option, optional EPIC scaffold (top-level definition cards). The creation-time inverse of `asana-hygiene` |
-| `asana-hygiene` skill | Audit + fix an Asana project; duplicate-pair detection included |
-| `shortcut-hygiene` skill | Same for Shortcut |
-| `asana_ops.py` | REST helper for Asana operations the MCP can't do (sections, custom fields, portfolios, comment posting) |
-| `shortcut_ops.py` | REST helper for Shortcut |
-| Operating-rule memories | Source-attribution discipline, hygiene-at-creation, bulk-notification muting — applied automatically |
+## Profiles
+
+The installer is role-aware — pick the profile that fits you:
+
+| Profile | Who | Skills installed |
+|---|---|---|
+| `pm` | Project / Product Managers | Board management only: `add-card`, `add-comment`, `card-done`, `asana-bootstrap`, `asana-hygiene`, `shortcut-hygiene` |
+| `engineer` | Fraction engineers | Everything: the PM set **plus** PR/workflow (`create-pr`, `pr-review`, `pr-watch`, `next-task`), build/test (`feature-build`, `test-gen`, `seed-data`), and ops (`do-deploy`, `cost-estimate`, `security-brief`, `bootstrap`, `migrate`, `stack-audit`, …) |
+
+`full` is an alias for `engineer`.
 
 ## Prerequisites
 
 - **Claude Code** installed and on your PATH. [Installation guide](https://docs.claude.com/en/docs/claude-code/installation).
-- **Python 3** with the `requests` module: `pip install --user requests`
+- **Python 3** (≥ 3.10 for the Asana MCP). The installer checks this and prints the fix if missing.
 - For each PM system you use, an account with permission to read + write cards.
 
-You do **not** need a GitHub account — this bundle is hosted in a public repo so anyone can clone or download.
+You do **not** need a GitHub account — this bundle is hosted in a public repo.
 
 ## Install
 
 One-liner (recommended):
 
 ```bash
+# PM profile (board management only):
 curl -sSL https://raw.githubusercontent.com/fractionwork/pm-skills/main/install.sh | bash
+
+# Engineer profile (everything):
+curl -sSL https://raw.githubusercontent.com/fractionwork/pm-skills/main/install.sh | bash -s -- --profile engineer
 ```
 
-Or clone first, if you'd like to inspect before running:
+Or clone first, to inspect before running:
 
 ```bash
 git clone https://github.com/fractionwork/pm-skills.git
 cd pm-skills
-bash install.sh
+bash install.sh --profile engineer
 ```
 
-The installer asks which PM systems you use, copies the relevant skills + scripts into `~/.claude/`, prints the MCP/plugin install commands you need to run, and sets up token storage at `~/.claude/.env` (chmod 600).
+The installer prompts for the profile (if not passed) and which PM systems you
+use, copies the relevant skills/scripts/agents into `~/.claude/`, registers the
+MCP servers at **user scope**, writes the operating-rules + skill-index block into
+`~/.claude/CLAUDE.md` (between managed markers — your own content is preserved),
+and sets up token storage at `~/.claude/.env` (chmod 600).
 
-Re-run the one-liner (or `bash install.sh` from a clone) after updates — it's idempotent.
+Re-run anytime to update — it's idempotent.
 
-### Dry run
+### Useful flags
 
 ```bash
-bash install.sh --dry-run
+bash install.sh --dry-run                       # show what would change, do nothing
+bash install.sh --profile pm --systems=asana    # skip both prompts
+bash install.sh --profile engineer --systems=asana,shortcut,linear
 ```
 
-Shows exactly what would change without touching anything.
+## What gets installed where
 
-### Skip the prompt
+- **Skills** → `~/.claude/skills/`
+- **Operator scripts** (`asana_ops.py`, `asana_mcp.py`, `shortcut_ops.py`, …) → `~/.claude/scripts/`
+- **Agents** (engineer profile, e.g. `pr-watch-reviewer`) → `~/.claude/agents/`
+- **MCP servers** (asana / shortcut / linear / atlassian-rovo) → user scope (`claude mcp list`)
+- **Operating rules + skill index** → `~/.claude/CLAUDE.md` (between `<!-- BEGIN/END: fraction-pm-skills -->` markers)
+- **Tokens** → `~/.claude/.env` (chmod 600 — never commit, never share)
 
-```bash
-bash install.sh --systems=asana,shortcut
-# or via the one-liner:
-curl -sSL https://raw.githubusercontent.com/fractionwork/pm-skills/main/install.sh | bash -s -- --systems=asana,shortcut
-```
+## Two tiers (engineers)
 
-## Per-system setup
-
-The installer prints the right command for each, but for reference:
-
-| System | Plugin / MCP | Auth |
-|---|---|---|
-| **Asana** | `claude plugin install asana` | OAuth via Anthropic's Asana app — browser opens on first use |
-| **Shortcut** | (no MCP — script only) | Personal token at https://app.shortcut.com/settings/account/api-tokens |
-| **Linear** | `claude mcp add linear https://mcp.linear.app/mcp` | OAuth on first use |
-| **Jira** | `claude mcp add atlassian-rovo https://mcp.atlassian.com/v1/sse` | OAuth on first use |
-
-## Using the skills
-
-In any Claude Code session, just describe what you want:
-
-- "add a ticket to ELEVAT3 about the failing approver dropdown"
-- "comment on card 1234 — tag @Jane and ask for confirmation on the rollout date"
-- "close ELEVAT3-87, summary: rolled out 2026-05-08, no incidents"
-- "audit the ELEVAT3 project for hygiene issues"
-- "create a new Asana board for the Sunset migration using our standards"
-
-The right skill loads automatically based on what you said.
-
-## Updating
-
-Run the same one-liner anytime — it always fetches and installs the latest:
-
-```bash
-curl -sSL https://raw.githubusercontent.com/fractionwork/pm-skills/main/install.sh | bash
-```
-
-What gets updated on every run:
-
-- **Skills** in `~/.claude/skills/<skill>/` — overwritten with the latest
-- **Scripts** in `~/.claude/scripts/` — overwritten with the latest
-- **PM operating rules** in `~/.claude/CLAUDE.md` — *only* the section between the `<!-- BEGIN: fraction-pm-skills -->` and `<!-- END: fraction-pm-skills -->` markers is replaced. Anything you added above or below those markers is preserved.
-
-What is NOT touched:
-
-- Tokens in `~/.claude/.env` — your stored credentials
-- Existing Asana OAuth token in `~/.claude/scripts/.asana-token.json`
-- Any other content in `~/.claude/CLAUDE.md` outside the markers
-- Your other skills, plugins, or MCP servers
-
-Cron / auto-update is not built in by design — running the installer is a deliberate "I want the latest" action. To check what would change before applying:
-
-```bash
-curl -sSL https://raw.githubusercontent.com/fractionwork/pm-skills/main/install.sh | bash -s -- --dry-run
-```
-
-If you cloned the repo locally instead:
-
-```bash
-cd pm-skills
-git pull
-bash install.sh
-```
-
-The installer overwrites the skills + scripts (always-latest wins) and skips memory files that already exist (so your local edits are preserved — delete a memory file before re-installing if you want it refreshed).
+These skills are **operator capability** and live at the user level. The
+stack-specific *substrate* they act on — reference docs, scaffold code, git
+hooks, CI workflows, and the project scripts (`pnpm pr:audit`, `db-migrate`, …)
+— lives **inside each project repo**, not here. Pull the latest substrate into a
+project with the `update-seed` skill ("sync from seed"). Operator skills update
+here (re-run the installer); project substrate updates there (the pull).
 
 ## Token rotation
 
-When leaving Fraction or rotating access:
-
-1. Revoke the token at its source (Asana / Shortcut / Linear / Jira settings).
-2. Delete the matching line from `~/.claude/.env`.
-3. For OAuth plugins, log out via the plugin's settings.
-
-## Troubleshooting
-
-**"Comment failed: 400" when posting to Asana** — the `add-comment` skill should catch this before sending. If it doesn't, the Asana HTML allowlist may have changed. Check https://developers.asana.com/reference/rich-text against `~/.claude/skills/add-comment/SKILL.md` Step 3 and report a mismatch.
-
-**Asana script can't authenticate** — the script defaults to OAuth via Anthropic's app. If that's failing, set `ASANA_PAT=<token>` in `~/.claude/.env` (generate at https://app.asana.com/0/my-apps).
-
-**Skill doesn't trigger on the phrase I tried** — open `~/.claude/skills/<skill>/SKILL.md` and check the trigger phrases in the description. Add your phrase to your own copy if it should match.
-
-**Need a Linear or Jira hygiene skill** — file a request at the source repo. The current bundle has Asana and Shortcut hygiene only; Linear / Jira will follow as those systems get more Fraction usage.
-
-## Source of truth
-
-This bundle is generated from the [DevHawk seed](https://github.com/fractionwork/devhawk-seed) — skills are authored there and projected here via `scripts/build-pm-bundle.sh`. Direct edits to this bundle's contents will be overwritten on the next build. File issues / PRs against the seed.
-
-## License
-
-Internal Fraction tooling. Distributed for use by Fraction Project and Product Managers.
+1. Revoke the token at the source (Asana / Shortcut / Linear settings).
+2. Delete the matching line from `~/.claude/.env` (and for Asana OAuth, delete `~/.claude/scripts/.asana-token.json`).
+3. Re-run the installer if you want to set a fresh one up.

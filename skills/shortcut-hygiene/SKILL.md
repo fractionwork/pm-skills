@@ -1,5 +1,6 @@
 ---
 name: shortcut-hygiene
+profiles: [pm, engineer]
 description: >
   Audit and fix a Shortcut project against Fraction best practices — missing
   Priority field, stories without estimates/owners/types, missing epics, vague

@@ -1,5 +1,6 @@
 ---
 name: card-done
+profiles: [pm, engineer]
 description: >
   Close out the active PM card after a PR is merged. Moves the card to
   Done/Ready for Test, posts a summary comment with PR details and review

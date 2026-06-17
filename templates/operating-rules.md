@@ -1,29 +1,3 @@
-<!-- BEGIN: fraction-pm-skills (managed by the pm-skills installer; content between these markers is overwritten on each install/update) -->
-# Fraction PM operating mode
-
-This Claude Code instance is configured for Project / Product Management work
-on Fraction's PM systems (Asana, Shortcut, Linear, Jira). Use the bundled
-skills to manage cards consistently.
-
-## Available PM skills
-
-- **`add-card`** — create a new top-level card with all hygiene rules applied (sections, fields, Feature, source attribution, dupe detection)
-- **`add-comment`** — post a comment on an existing card; converts Markdown into the format each system actually accepts (Asana's HTML allowlist is fussy — this skill validates *before* the call so you never see a silent failure)
-- **`card-done`** — close a card with a summary comment; works for dev-flavored merges and PM-flavored manual closeouts
-- **`asana-hygiene`** — audit + fix an Asana project against Fraction best practices; includes duplicate-pair detection
-- **`shortcut-hygiene`** — same for Shortcut
-
-## Trigger phrases
-
-| Want to … | Say something like … |
-|---|---|
-| Create a card | "add a ticket to ELEVAT3 about X", "log a bug about Y" |
-| Comment on a card | "comment on card X", "leave a note on the ticket", "@mention Jane on this card" |
-| Close a card | "close this card", "card done", "move X to done" |
-| Audit a project | "clean up Asana", "audit ELEVAT3", "shortcut hygiene" |
-
-When in doubt, just describe what you want in natural language — the skill loader picks the right one based on the trigger phrases.
-
 ## Operating rules — apply these on every PM operation
 
 These are the standing rules for PM work. Apply them automatically — don't
@@ -88,19 +62,18 @@ When performing bulk transitions on PM cards — moving sections en masse, marki
 
 **Why this rule exists:** A bulk move of 35 SCRUM cards from READY FOR RELEASE → DONE fired ~35 individual completion notifications, landing as 35 emails in the team's inboxes simultaneously for what was conceptually a single bookkeeping action. "We will mute next time."
 
-## What's NOT installed
-
-This is the PM-only bundle. The full DevHawk seed (used by Fraction engineers) includes additional skills for code review, PR management, feature builds, deployments, and stack bootstrapping — those are not in scope here. If you find yourself needing dev tooling, ask a Fraction engineer to walk through the full seed install.
-
 ## Updating
 
-Run the same one-liner anytime — it always fetches the latest version:
+Re-run the installer one-liner anytime — it always fetches the latest version and is idempotent:
 
 ```bash
+# PM profile (board management only):
 curl -sSL https://raw.githubusercontent.com/fractionwork/pm-skills/main/install.sh | bash
+# Engineer profile (adds PR / workflow / build / ops skills):
+curl -sSL https://raw.githubusercontent.com/fractionwork/pm-skills/main/install.sh | bash -s -- --profile engineer
 ```
 
-The installer is idempotent and only touches the section between the
+The installer only touches the section between the
 `<!-- BEGIN: fraction-pm-skills -->` markers in this file. Anything you
 added above or below those markers is preserved.
 
@@ -108,8 +81,20 @@ added above or below those markers is preserved.
 
 - Skills: `~/.claude/skills/` (e.g. `~/.claude/skills/add-card/SKILL.md`)
 - Scripts: `~/.claude/scripts/` (e.g. `~/.claude/scripts/asana_ops.py`)
+- Agents: `~/.claude/agents/` (engineer profile only)
 - This file (operating rules + skill index): `~/.claude/CLAUDE.md`
 - Tokens: `~/.claude/.env` (chmod 600 — never commit, never share)
+
+## Project substrate (engineer profile)
+
+These user-level skills are **operator capability**. The stack-specific
+substrate they read and call — reference docs under `docs/`, scaffold code,
+git hooks, CI workflows, and the project scripts (`pnpm pr:audit`,
+`db-migrate`, etc.) — lives **inside each project repo**, not here. Pull the
+latest substrate into a project with the `update-seed` skill ("sync from
+seed"). Operator skills update here via the installer; project substrate
+updates there via the pull. See `docs/seed-distribution.md` in any seeded
+project for the full two-tier model.
 
 ## Token rotation
 
@@ -119,6 +104,4 @@ When you leave Fraction or want to rotate access:
 2. Delete the matching line from `~/.claude/.env`.
 3. Re-run the install command if you want to set a fresh one up.
 
-For Asana plugin OAuth: open Claude Code, run the plugin's logout flow, then re-auth on next use.
-<!-- END: fraction-pm-skills -->
-
+For Asana OAuth: delete `~/.claude/scripts/.asana-token.json` and re-run `python3 ~/.claude/scripts/asana_ops.py --auth`.

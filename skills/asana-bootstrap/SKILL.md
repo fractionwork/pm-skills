@@ -1,5 +1,6 @@
 ---
 name: asana-bootstrap
+profiles: [pm, engineer]
 description: >
   Create a new Asana project with Fraction standards applied up front — required
   admins, the 8 custom fields (incl. Theme + Feature), 8 sections (INBOX→DONE),

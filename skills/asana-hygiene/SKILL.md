@@ -1,5 +1,6 @@
 ---
 name: asana-hygiene
+profiles: [pm, engineer]
 description: >
   Audit and fix an Asana project against Fraction best practices — missing
   custom fields (incl. Theme + Feature), subtasks that need elevating to

@@ -1,5 +1,6 @@
 ---
 name: add-comment
+profiles: [pm, engineer]
 description: >
   Post a comment on a PM card (Asana / Shortcut / Linear / Jira), converting
   Markdown or plain text into the format each system accepts — Asana's narrow

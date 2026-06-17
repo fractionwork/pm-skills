@@ -1,19 +1,30 @@
 #!/usr/bin/env bash
-# Fraction PM Skills — installer
+# Fraction DevHawk Skills — installer
 #
-# Copies the PM-only skills, scripts, and memories from this bundle into
-# the user's ~/.claude/ directories so Claude Code can run them.
+# Installs Fraction's operator skills, scripts, agents, and MCP servers into
+# the user's ~/.claude/ directories so Claude Code can run them. One installer,
+# role-aware profiles:
+#
+#   --profile pm        Board management only (add-card, add-comment, card-done,
+#                       asana-hygiene, shortcut-hygiene, asana-bootstrap).
+#   --profile engineer  Everything: PM + PR/workflow + build/test + ops +
+#                       bootstrap/migrate/adopt. (alias: --profile full)
+#
+# Operator skills are stack-agnostic and live at the USER level — update them
+# by re-running this installer. The stack-specific substrate they act on
+# (docs, scaffold, git hooks, CI, project scripts) lives INSIDE each project
+# repo and is pulled there via the `update-seed` skill, not by this installer.
 # Idempotent — safe to re-run after updates.
 #
 # Usage:
-#   # Local clone:
-#   bash install.sh                # interactive
-#   bash install.sh --dry-run      # show what would change, do nothing
-#   bash install.sh --systems=asana,shortcut  # skip the multi-select prompt
+#   bash install.sh                          # interactive (prompts for profile + systems)
+#   bash install.sh --profile engineer       # full engineer profile
+#   bash install.sh --profile pm --systems=asana,shortcut
+#   bash install.sh --dry-run                # show what would change, do nothing
 #
 #   # Curl one-liner (auto-clones the repo into a tmp dir):
 #   curl -sSL https://raw.githubusercontent.com/fractionwork/pm-skills/main/install.sh | bash
-#   curl -sSL https://raw.githubusercontent.com/fractionwork/pm-skills/main/install.sh | bash -s -- --dry-run
+#   curl -sSL https://raw.githubusercontent.com/fractionwork/pm-skills/main/install.sh | bash -s -- --profile engineer
 
 set -euo pipefail
 
@@ -27,7 +38,7 @@ has_tty() { (exec </dev/tty) 2>/dev/null; }
 
 # ── Self-fetch path ────────────────────────────────────────────────────
 # When invoked via `curl ... | bash`, BASH_SOURCE is empty / the script
-# isn't on disk, and the bundle files (skills/, scripts/, memory/) aren't
+# isn't on disk, and the bundle files (skills/, scripts/, agents/) aren't
 # alongside us. Clone the repo into a temp dir and re-exec from there
 # with the original args preserved.
 SCRIPT_PATH=""
@@ -44,7 +55,7 @@ if [[ -z "$SCRIPT_PATH" ]] || [[ ! -d "$SCRIPT_PATH/skills" ]]; then
   fi
   TMP="$(mktemp -d)"
   trap 'rm -rf "$TMP"' EXIT
-  echo "→ Fetching pm-skills..."
+  echo "→ Fetching devhawk-skills..."
   if ! git clone --depth=1 --branch "$REPO_BRANCH" --quiet "$REPO_URL" "$TMP/pm-skills"; then
     echo "✗ Failed to clone $REPO_URL" >&2
     exit 1
@@ -53,8 +64,6 @@ if [[ -z "$SCRIPT_PATH" ]] || [[ ! -d "$SCRIPT_PATH/skills" ]]; then
   # Re-exec with stdin redirected to the terminal — when piped via curl,
   # the original stdin is the curl output (EOF by now), so any later
   # `read` prompt would return immediately and abort the install.
-  # Test the redirect itself (file existence isn't enough — the process
-  # group may have no controlling terminal even when /dev/tty exists).
   if has_tty; then
     exec bash install.sh "$@" </dev/tty
   else
@@ -64,27 +73,34 @@ fi
 
 DRY_RUN=0
 SYSTEMS_ARG=""
-for arg in "$@"; do
-  case "$arg" in
+PROFILE=""
+while [[ $# -gt 0 ]]; do
+  case "$1" in
     --dry-run) DRY_RUN=1 ;;
-    --systems=*) SYSTEMS_ARG="${arg#--systems=}" ;;
+    --systems=*) SYSTEMS_ARG="${1#--systems=}" ;;
+    --systems) shift; SYSTEMS_ARG="${1:-}" ;;
+    --profile=*) PROFILE="${1#--profile=}" ;;
+    --profile) shift; PROFILE="${1:-}" ;;
     -h|--help)
-      sed -n '1,18p' "$0" | sed 's/^# \{0,1\}//'
+      sed -n '1,22p' "$0" | sed 's/^# \{0,1\}//'
       exit 0
       ;;
     *)
-      echo "Unknown arg: $arg" >&2
+      echo "Unknown arg: $1" >&2
       exit 1
       ;;
   esac
+  shift
 done
 
 BUNDLE_DIR="$SCRIPT_PATH"
 CLAUDE_HOME="${CLAUDE_HOME:-$HOME/.claude}"
 SKILLS_DIR="$CLAUDE_HOME/skills"
 SCRIPTS_DIR="$CLAUDE_HOME/scripts"
+AGENTS_DIR="$CLAUDE_HOME/agents"
 ENV_FILE="$CLAUDE_HOME/.env"
 USER_CLAUDE_MD="$CLAUDE_HOME/CLAUDE.md"
+SETTINGS_FILE="$CLAUDE_HOME/settings.json"
 
 say() { printf "  %s\n" "$*"; }
 ok()  { printf "  ✓ %s\n" "$*"; }
@@ -103,16 +119,13 @@ do_step() {
 # NOT overwrite. Under `set -e` that aborts the installer on any re-run, and it
 # silently blocks re-registering a server to swap its env (e.g. OAuth → PAT).
 # Remove first so every add below is genuinely idempotent. No-op if absent.
-# (`claude mcp remove` with no scope removes from whichever scope it exists in,
-# so this also clears any stale local-scope entry from an older installer.)
 mcp_reset() { do_step "claude mcp remove '$1' >/dev/null 2>&1 || true"; }
 
 # The official `mcp` SDK requires Python >= 3.10. Stock macOS and older Xcode
-# Command Line Tools ship python3 = 3.9, where EVERY pip method fails with "no
-# matching distribution" — the #1 cause of "could not install deps" on a Mac.
-# Echo the newest >=3.10 interpreter on PATH (absolute path), or nothing.
+# Command Line Tools ship python3 = 3.9, where EVERY pip method fails. Echo the
+# newest >=3.10 interpreter on PATH (absolute path), or nothing.
 find_py() {
-  local c p
+  local c
   for c in python3.13 python3.12 python3.11 python3.10 python3; do
     command -v "$c" >/dev/null 2>&1 || continue
     if "$c" -c 'import sys; sys.exit(0 if sys.version_info >= (3,10) else 1)' 2>/dev/null; then
@@ -125,10 +138,8 @@ find_py() {
 
 # Install the MCP server's Python deps and choose the interpreter Claude Code
 # will launch it with (MCP_PYTHON). A dedicated venv is the primary path: it
-# sidesteps PEP 668 "externally-managed-environment" errors — Homebrew and
-# Debian/Ubuntu system Python refuse `pip install` — AND guarantees the exact
-# interpreter we register has the deps. Falls back to user-site installs, then
-# warns (registration still happens so the server is at least visible in /mcp).
+# sidesteps PEP 668 "externally-managed-environment" errors AND guarantees the
+# exact interpreter we register has the deps. Falls back to user-site, then warns.
 MCP_PYTHON="python3"
 install_mcp_deps() {
   local req="$SCRIPTS_DIR/requirements-mcp.txt"
@@ -148,14 +159,12 @@ install_mcp_deps() {
     MCP_PYTHON="$venv/bin/python"
     return
   fi
-  # Drop any stale/broken venv from a prior run (e.g. one built with old Python).
   rm -rf "$venv" 2>/dev/null || true
   if "$py" -m venv "$venv" >/dev/null 2>&1 && "$venv/bin/pip" install -q -r "$req" >/dev/null 2>&1; then
     MCP_PYTHON="$venv/bin/python"
     ok "MCP deps installed in venv ($("$py" --version 2>&1))"
     return
   fi
-  # venv path failed — show the REAL error (don't swallow it), then try user-site.
   warn "venv install failed; underlying error:"
   { "$py" -m venv "$venv" && "$venv/bin/pip" install -r "$req"; } 2>&1 | tail -8 | sed 's/^/    /' || true
   if "$py" -m pip install --user -q -r "$req" >/dev/null 2>&1 \
@@ -170,9 +179,32 @@ install_mcp_deps() {
   fi
 }
 
+# Skills matching a profile: prints skill dir-names (one per line) whose
+# `profiles:` frontmatter contains $1, or all skills when $1 == full.
+# Reads frontmatter with python3 (a hard prereq below) for reliable parsing.
+skills_for_profile() {
+  local profile="$1"
+  python3 - "$profile" "$BUNDLE_DIR/skills" <<'PY'
+import os, re, sys
+profile, root = sys.argv[1], sys.argv[2]
+for name in sorted(os.listdir(root)):
+    sk = os.path.join(root, name, "SKILL.md")
+    if not os.path.isfile(sk):
+        continue
+    with open(sk, encoding="utf-8") as f:
+        text = f.read()
+    m = re.match(r"^---\n(.*?)\n---", text, re.S)
+    fm = m.group(1) if m else ""
+    pm = re.search(r"^profiles:\s*\[([^\]]*)\]", fm, re.M)
+    profs = [p.strip() for p in (pm.group(1).split(",") if pm else []) if p.strip()]
+    if profile == "full" or profile in profs:
+        print(name)
+PY
+}
+
 echo ""
-echo "Fraction PM Skills installer"
-echo "============================"
+echo "Fraction DevHawk Skills installer"
+echo "================================="
 echo ""
 
 # ── Step 1: Prereq check ─────────────────────────────────────────────
@@ -185,15 +217,11 @@ fi
 ok "Claude Code: $(claude --version 2>/dev/null || echo 'present')"
 
 if ! command -v python3 >/dev/null 2>&1; then
-  err "python3 not found — required by asana_ops.py / shortcut_ops.py"
+  err "python3 not found — required by the installer and by asana_ops.py / shortcut_ops.py"
   exit 1
 fi
-ok "python3 (CLI scripts): $(python3 --version 2>&1)"
+ok "python3: $(python3 --version 2>&1)"
 
-# The Asana MCP server needs Python >= 3.10 (the `mcp` SDK floor). find_py picks
-# that interpreter by name regardless of what bare `python3` resolves to — so
-# report THAT here. Otherwise the line shows the system python3 (often 3.9 on
-# macOS) and looks broken even when a usable 3.12 is installed alongside.
 MCP_PY_PRECHECK="$(find_py || true)"
 if [[ -n "$MCP_PY_PRECHECK" ]]; then
   ok "python (Asana MCP):   $("$MCP_PY_PRECHECK" --version 2>&1)  [$MCP_PY_PRECHECK]"
@@ -202,12 +230,7 @@ else
   warn "    macOS: brew install python@3.12   then re-run this installer."
 fi
 
-# asana_ops.py / shortcut_ops.py do `import requests` and run under the DEFAULT
-# python3 — both by `--auth` below and by the skills at runtime — so requests
-# must be importable THERE, not just in the MCP venv. Install it if missing,
-# with a PEP 668 fallback (Homebrew / Debian system Python block plain installs,
-# which is exactly the "ModuleNotFoundError: No module named 'requests'" a PM hit
-# after switching their default python to a fresh Homebrew build).
+# requests must import under the DEFAULT python3 (the CLI scripts run there).
 if python3 -c 'import requests' 2>/dev/null; then
   ok "python 'requests': present"
 elif [[ $DRY_RUN -eq 1 ]]; then
@@ -221,25 +244,53 @@ else
   warn "    python3 -m pip install --user requests    (or --break-system-packages)"
 fi
 
-# Pre-create the Claude Code home and its standard subdirs so the rest of
-# the installer can drop files in unconditionally — even if the PM has
-# never opened Claude Code before. mkdir -p creates parents and is a
-# no-op if the dir already exists.
 do_step "mkdir -p '$CLAUDE_HOME' '$SKILLS_DIR' '$SCRIPTS_DIR'"
 ok "Claude home ready: $CLAUDE_HOME"
 
-# ── Step 2: System selection ─────────────────────────────────────────
+# ── Step 2: Profile selection ────────────────────────────────────────
 echo ""
-echo "2. Which PM systems do you use?"
+echo "2. Which skill profile?"
+if [[ -z "$PROFILE" ]]; then
+  if has_tty; then
+    echo "     1) pm        — board management only"
+    echo "     2) engineer  — everything (PM + PR/workflow + build + ops)"
+    echo ""
+    read -rp "  > [1] " pc </dev/tty
+    case "${pc:-1}" in
+      1|pm) PROFILE="pm" ;;
+      2|engineer|full) PROFILE="engineer" ;;
+      *) warn "unrecognized '$pc' — defaulting to pm"; PROFILE="pm" ;;
+    esac
+  else
+    # Non-interactive with no --profile: default to pm (preserves the bare
+    # curl-pipe one-liner's historical PM behavior).
+    PROFILE="pm"
+  fi
+fi
+case "$PROFILE" in
+  pm|engineer|full) ;;
+  *) err "unknown profile '$PROFILE' (expected: pm | engineer | full)"; exit 1 ;;
+esac
+ok "Profile: $PROFILE"
+
+# Resolve the skill set for this profile up front.
+mapfile -t PROFILE_SKILLS < <(skills_for_profile "$PROFILE")
+if [[ ${#PROFILE_SKILLS[@]} -eq 0 ]]; then
+  err "no skills matched profile '$PROFILE' — is the bundle complete?"
+  exit 1
+fi
+ENGINEER=0
+[[ "$PROFILE" == "engineer" || "$PROFILE" == "full" ]] && ENGINEER=1
+
+# ── Step 3: System selection ─────────────────────────────────────────
+echo ""
+echo "3. Which PM systems do you use? (drives MCP + script install)"
 
 if [[ -n "$SYSTEMS_ARG" ]]; then
   IFS=',' read -ra SYSTEMS <<< "$SYSTEMS_ARG"
 else
   echo "   Choose all that apply (space-separated, e.g. '1 2'):"
-  echo "     1) Asana"
-  echo "     2) Shortcut"
-  echo "     3) Linear"
-  echo "     4) Jira"
+  echo "     1) Asana   2) Shortcut   3) Linear   4) Jira"
   echo ""
   if has_tty; then
     read -rp "  > " choice </dev/tty
@@ -264,45 +315,34 @@ if [[ ${#SYSTEMS[@]} -eq 0 ]]; then
   err "No PM systems selected — nothing to install."
   exit 1
 fi
-ok "Selected: ${SYSTEMS[*]}"
+ok "Selected systems: ${SYSTEMS[*]}"
 
-# ── Step 3: Copy universal skills (add-card, add-comment, card-done) ──
+# ── Step 4: Install skills (filtered by profile) ─────────────────────
 echo ""
-echo "3. Installing skills..."
+echo "4. Installing skills ($PROFILE profile, ${#PROFILE_SKILLS[@]} skills)..."
 do_step "mkdir -p '$SKILLS_DIR'"
-for skill in add-card add-comment card-done; do
+for skill in "${PROFILE_SKILLS[@]}"; do
+  do_step "rm -rf '$SKILLS_DIR/$skill'"
   do_step "cp -R '$BUNDLE_DIR/skills/$skill' '$SKILLS_DIR/'"
   ok "skill: $skill"
 done
 
-# Per-system hygiene skills
-for sys in "${SYSTEMS[@]}"; do
-  case "$sys" in
-    asana)
-      do_step "cp -R '$BUNDLE_DIR/skills/asana-hygiene' '$SKILLS_DIR/'"
-      ok "skill: asana-hygiene"
-      ;;
-    shortcut)
-      do_step "cp -R '$BUNDLE_DIR/skills/shortcut-hygiene' '$SKILLS_DIR/'"
-      ok "skill: shortcut-hygiene"
-      ;;
-    linear|jira)
-      warn "no hygiene skill bundled yet for $sys (planned)"
-      ;;
-  esac
-done
-
-# ── Step 4: Copy scripts (per system) ─────────────────────────────────
+# ── Step 5: Install scripts + agents ─────────────────────────────────
 echo ""
-echo "4. Installing scripts..."
+echo "5. Installing scripts + agents..."
 do_step "mkdir -p '$SCRIPTS_DIR'"
+
+# check-skill-deps.mjs powers the SessionStart dependency check (step 8).
+if [[ -f "$BUNDLE_DIR/scripts/check-skill-deps.mjs" ]]; then
+  do_step "cp '$BUNDLE_DIR/scripts/check-skill-deps.mjs' '$SCRIPTS_DIR/check-skill-deps.mjs'"
+  ok "script: check-skill-deps.mjs"
+fi
+
 for sys in "${SYSTEMS[@]}"; do
   case "$sys" in
     asana)
       do_step "cp '$BUNDLE_DIR/scripts/asana_ops.py' '$SCRIPTS_DIR/asana_ops.py'"
       ok "script: asana_ops.py"
-      # First-party MCP server + its deps manifest. asana_mcp.py imports
-      # asana_ops.py (above) for auth/REST, so they live side by side.
       do_step "cp '$BUNDLE_DIR/scripts/asana_mcp.py' '$SCRIPTS_DIR/asana_mcp.py'"
       ok "script: asana_mcp.py"
       do_step "cp '$BUNDLE_DIR/scripts/requirements-mcp.txt' '$SCRIPTS_DIR/requirements-mcp.txt'"
@@ -315,29 +355,32 @@ for sys in "${SYSTEMS[@]}"; do
   esac
 done
 
-# ── Step 5: Install MCP servers + plugins ─────────────────────────────
+if [[ $ENGINEER -eq 1 ]]; then
+  if [[ -f "$BUNDLE_DIR/scripts/pr-watch-state.mjs" ]]; then
+    do_step "cp '$BUNDLE_DIR/scripts/pr-watch-state.mjs' '$SCRIPTS_DIR/pr-watch-state.mjs'"
+    ok "script: pr-watch-state.mjs"
+  fi
+  if [[ -d "$BUNDLE_DIR/agents" ]]; then
+    do_step "mkdir -p '$AGENTS_DIR'"
+    for a in "$BUNDLE_DIR"/agents/*.md; do
+      [[ -e "$a" ]] || continue
+      do_step "cp '$a' '$AGENTS_DIR/$(basename "$a")'"
+      ok "agent: $(basename "$a" .md)"
+    done
+  fi
+fi
+
+# ── Step 6: Install MCP servers ──────────────────────────────────────
 echo ""
-echo "5. Installing MCP servers + plugins..."
+echo "6. Installing MCP servers..."
 for sys in "${SYSTEMS[@]}"; do
   case "$sys" in
     asana)
-      # First-party MCP server (scripts/asana_mcp.py) is the preferred Asana
-      # surface — it supports BOTH OAuth (full users) and PAT (guests), and
-      # exposes curated writes (hygiene/comment/assign/move/capture). The
-      # official `asana` plugin offers an overlapping Asana tool surface, so
-      # disable it if present for one unambiguous surface (best-effort, no-op
-      # otherwise).
       do_step "claude plugin disable asana 2>/dev/null || true"
       install_mcp_deps
-      # Register at USER scope so the server appears in /mcp across every project.
-      # The default `local` scope keys to the install CWD — a temp clone dir on
-      # the curl-pipe path — so a local-scoped server vanishes when that dir is
-      # cleaned up. mcp_reset keeps re-runs idempotent. Default wiring is OAuth
-      # (ASANA_TOKEN_FILE = where Step 6's --auth writes the token store);
-      # ASANA_WORKSPACE_FILE honors a saved "pick once" choice regardless of CWD.
       mcp_reset asana
       do_step "claude mcp add asana --scope user -e ASANA_TOKEN_FILE='$SCRIPTS_DIR/.asana-token.json' -e ASANA_WORKSPACE_FILE='$SCRIPTS_DIR/.asana-workspace.json' -- '$MCP_PYTHON' '$SCRIPTS_DIR/asana_mcp.py'"
-      ok "asana MCP: first-party server registered at user scope (auth in step 6)"
+      ok "asana MCP: first-party server registered at user scope (auth in step 7)"
       ;;
     linear)
       mcp_reset linear
@@ -355,10 +398,10 @@ for sys in "${SYSTEMS[@]}"; do
   esac
 done
 
-# ── Step 6: Token setup (per system that uses scripts) ────────────────
-echo "6. Token setup"
-echo "   Tokens for the script-based paths land in $ENV_FILE (chmod 600)."
+# ── Step 7: Token setup ───────────────────────────────────────────────
 echo ""
+echo "7. Token setup"
+echo "   Tokens for the script-based paths land in $ENV_FILE (chmod 600)."
 
 setup_token() {
   local var="$1"
@@ -392,13 +435,6 @@ setup_token() {
 for sys in "${SYSTEMS[@]}"; do
   case "$sys" in
     asana)
-      # One Asana auth, shared by the asana_ops.py CLI AND the first-party MCP
-      # (registered in step 5) — the MCP reads the same token store via
-      # ASANA_TOKEN_FILE, so authing here lights up both surfaces.
-      #   • Full user → OAuth: asana_ops.py --auth (PKCE browser flow) writes
-      #     .asana-token.json next to the script. No MCP re-registration needed.
-      #   • Guest/service account → PAT: paste it; we save it for the script
-      #     AND re-register the MCP with it baked in (ASANA_ACCESS_TOKEN).
       echo ""
       echo "   Asana auth — pick one:"
       echo "     • Full user: OAuth browser login (recommended)"
@@ -409,10 +445,6 @@ for sys in "${SYSTEMS[@]}"; do
       elif has_tty; then
         read -rp "   Auth via OAuth now? Opens a browser. [Y/n] (n = paste a PAT): " ans </dev/tty
         ans="${ans:-Y}"
-        # Pattern match instead of `${ans^^}` — macOS ships bash 3.2 by default
-        # (GPLv3 keeps Apple from updating it), and `^^` is bash 4+ only. Without
-        # this, the prompt always took the "skip" branch on Mac, leaving every
-        # macOS user un-auth'd against Asana with no clear error trail.
         if [[ "$ans" == [Yy] ]]; then
           if [[ $DRY_RUN -eq 1 ]]; then
             say "(dry-run) python3 '$SCRIPTS_DIR/asana_ops.py' --auth"
@@ -421,10 +453,6 @@ for sys in "${SYSTEMS[@]}"; do
               warn "OAuth failed — re-run later: python3 $SCRIPTS_DIR/asana_ops.py --auth"
           fi
         else
-          # Guest path: capture a PAT, persist it for the script, and re-register
-          # the MCP with the PAT baked in, replacing the OAuth-wired entry from
-          # step 5. mcp_reset drops that entry first so the env swap takes effect
-          # (claude mcp add won't overwrite an existing name).
           read -rp "   Paste your Asana PAT (or leave blank to skip): " pat </dev/tty
           if [[ -n "$pat" ]]; then
             do_step "touch '$ENV_FILE' && chmod 600 '$ENV_FILE'"
@@ -433,8 +461,6 @@ for sys in "${SYSTEMS[@]}"; do
             mcp_reset asana
             do_step "claude mcp add asana --scope user -e ASANA_ACCESS_TOKEN='$pat' -e ASANA_WORKSPACE_FILE='$SCRIPTS_DIR/.asana-workspace.json' -- '$MCP_PYTHON' '$SCRIPTS_DIR/asana_mcp.py'"
             ok "asana MCP: re-registered with your PAT"
-            say "Tip: fence a guest to one project — ask Claude 'list my Asana projects',"
-            say "  then re-add with -e ASANA_ALLOWED_PROJECTS=<gid> (and -e ASANA_READ_ONLY=1 for read-only)."
           else
             warn "skipped — run later: python3 $SCRIPTS_DIR/asana_ops.py --auth (OAuth), or add ASANA_PAT=... to $ENV_FILE"
           fi
@@ -452,63 +478,134 @@ for sys in "${SYSTEMS[@]}"; do
   esac
 done
 
-# ── Step 7: PM operating-rules in user CLAUDE.md ──────────────────────
-# These rules used to ship as separate "memory" files, but Claude Code's
-# auto-memory system is per-project — files dropped at $CLAUDE_HOME/memory/
-# don't load in any session. The user-global $CLAUDE_HOME/CLAUDE.md is
-# the right surface for rules that should apply across every project.
-#
-# The PM section is wrapped in <!-- BEGIN/END: fraction-pm-skills -->
-# markers so re-runs replace JUST that section — anything the user added
-# above or below the markers is preserved untouched.
+# ── Step 8: Operating-rules + skill index in user CLAUDE.md ──────────
+# The block is wrapped in <!-- BEGIN/END: fraction-pm-skills --> markers
+# (name kept for backward-compat with existing user CLAUDE.md files) so
+# re-runs replace JUST that section. The skill index is GENERATED from each
+# installed skill's frontmatter — never hand-maintained.
 echo ""
-echo "7. PM operating mode in $USER_CLAUDE_MD"
-PM_CLAUDE_TEMPLATE="$BUNDLE_DIR/PM-CLAUDE.md"
+echo "8. Operating mode in $USER_CLAUDE_MD"
+RULES_TEMPLATE="$BUNDLE_DIR/templates/operating-rules.md"
 BEGIN_MARK="<!-- BEGIN: fraction-pm-skills"
 END_MARK="<!-- END: fraction-pm-skills -->"
 
-if [[ ! -f "$PM_CLAUDE_TEMPLATE" ]]; then
-  warn "PM-CLAUDE.md template missing from bundle — skipping"
-elif [[ ! -f "$USER_CLAUDE_MD" ]]; then
-  do_step "cp '$PM_CLAUDE_TEMPLATE' '$USER_CLAUDE_MD'"
-  ok "created $USER_CLAUDE_MD"
-elif grep -qF "$BEGIN_MARK" "$USER_CLAUDE_MD" && grep -qF "$END_MARK" "$USER_CLAUDE_MD"; then
-  # Markers present — replace content between them (idempotent update path).
+if [[ ! -f "$RULES_TEMPLATE" ]]; then
+  warn "operating-rules template missing from bundle — skipping CLAUDE.md update"
+else
+  # Generate the skill-index markdown from the installed skills' frontmatter.
+  SKILL_INDEX="$(python3 - "$SKILLS_DIR" "${PROFILE_SKILLS[@]}" <<'PY'
+import os, re, sys
+skills_dir = sys.argv[1]
+for name in sys.argv[2:]:
+    sk = os.path.join(skills_dir, name, "SKILL.md")
+    if not os.path.isfile(sk):
+        continue
+    with open(sk, encoding="utf-8") as f:
+        text = f.read()
+    m = re.match(r"^---\n(.*?)\n---", text, re.S)
+    fm = m.group(1) if m else ""
+    dm = re.search(r"^description:\s*(.*?)(?=^\w[\w-]*:|\Z)", fm, re.S | re.M)
+    desc = dm.group(1) if dm else ""
+    desc = desc.lstrip(">|").strip()
+    desc = re.sub(r"\s+", " ", desc)
+    # First sentence (up to ". "), capped so the index stays scannable.
+    first = re.split(r"(?<=\.)\s", desc, 1)[0] if desc else ""
+    if len(first) > 200:
+        first = first[:197].rstrip() + "..."
+    print(f"- **`{name}`** — {first}")
+PY
+)"
+
+  BLOCK_FILE="$(mktemp)"
+  {
+    echo "$BEGIN_MARK (managed by the devhawk-skills installer; content between these markers is overwritten on each install/update) -->"
+    echo "# Fraction operating mode (${PROFILE} profile)"
+    echo ""
+    echo "This Claude Code instance is configured with Fraction's **${PROFILE}** skill"
+    echo "profile. Skills load automatically via their frontmatter \`description\` —"
+    echo "invoke by name or just describe what you want."
+    echo ""
+    echo "## Available skills (${PROFILE} profile)"
+    echo ""
+    echo "$SKILL_INDEX"
+    echo ""
+    cat "$RULES_TEMPLATE"
+    echo "$END_MARK"
+  } > "$BLOCK_FILE"
+
   if [[ $DRY_RUN -eq 1 ]]; then
-    say "(dry-run) replace PM section between markers in $USER_CLAUDE_MD"
-  else
-    awk -v new_file="$PM_CLAUDE_TEMPLATE" '
-      BEGIN { skip = 0 }
-      /<!-- BEGIN: fraction-pm-skills/ {
+    say "(dry-run) write ${#PROFILE_SKILLS[@]}-skill index + operating rules between markers in $USER_CLAUDE_MD"
+  elif [[ ! -f "$USER_CLAUDE_MD" ]]; then
+    cp "$BLOCK_FILE" "$USER_CLAUDE_MD"
+    ok "created $USER_CLAUDE_MD"
+  elif grep -qF "$BEGIN_MARK" "$USER_CLAUDE_MD" && grep -qF "$END_MARK" "$USER_CLAUDE_MD"; then
+    # Anchor the marker match to column 0 — the real markers start the line,
+    # while the operating-rules prose *mentions* the marker text mid-line.
+    # An unanchored match would re-trigger injection on that prose and
+    # duplicate the block on every re-run.
+    awk -v new_file="$BLOCK_FILE" '
+      /^<!-- BEGIN: fraction-pm-skills/ {
         while ((getline line < new_file) > 0) print line
-        close(new_file)
-        skip = 1
-        next
+        close(new_file); skip = 1; next
       }
-      /<!-- END: fraction-pm-skills -->/ {
-        if (skip) { skip = 0; next }
-      }
+      /^<!-- END: fraction-pm-skills -->/ { if (skip) { skip = 0; next } }
       !skip { print }
     ' "$USER_CLAUDE_MD" > "$USER_CLAUDE_MD.tmp" && mv "$USER_CLAUDE_MD.tmp" "$USER_CLAUDE_MD"
-    ok "updated PM section in $USER_CLAUDE_MD (content between markers replaced)"
+    ok "updated operating-mode section in $USER_CLAUDE_MD (content between markers replaced)"
+  else
+    { echo ""; cat "$BLOCK_FILE"; } >> "$USER_CLAUDE_MD"
+    ok "appended operating-mode section to $USER_CLAUDE_MD"
   fi
-elif grep -qF "Fraction PM operating mode" "$USER_CLAUDE_MD"; then
-  # Legacy install: PM content is present but lacks markers. Replace the
-  # whole block so future updates can use the marker path. We don't know
-  # exactly where it starts/ends without markers — safest: append a fresh
-  # marked block and tell the user to manually delete the un-marked old one.
-  do_step "{ echo ''; cat '$PM_CLAUDE_TEMPLATE'; } >> '$USER_CLAUDE_MD'"
-  warn "found legacy un-marked PM section in $USER_CLAUDE_MD"
-  warn "  appended fresh marked block — manually delete the old un-marked section"
+  rm -f "$BLOCK_FILE"
+fi
+
+# ── Step 9: SessionStart dependency-check hook (user scope) ──────────
+# Skills now live at the user level, so the dependency check runs here too.
+# Registered in ~/.claude/settings.json via python3 (jq-free, safe merge).
+# node-guarded so PM-only users without node aren't blocked.
+echo ""
+echo "9. Dependency-check hook"
+DEPS_SCRIPT="$SCRIPTS_DIR/check-skill-deps.mjs"
+if [[ ! -f "$BUNDLE_DIR/scripts/check-skill-deps.mjs" ]]; then
+  say "check-skill-deps.mjs not in bundle — skipping hook"
+elif [[ $DRY_RUN -eq 1 ]]; then
+  say "(dry-run) register SessionStart hook → node $DEPS_SCRIPT --on-session-start --skills-dir $SKILLS_DIR"
 else
-  do_step "{ echo ''; cat '$PM_CLAUDE_TEMPLATE'; } >> '$USER_CLAUDE_MD'"
-  ok "appended PM section to $USER_CLAUDE_MD"
+  HOOK_CMD="command -v node >/dev/null 2>&1 && node '$DEPS_SCRIPT' --on-session-start --skills-dir '$SKILLS_DIR' || true"
+  python3 - "$SETTINGS_FILE" "$HOOK_CMD" <<'PY'
+import json, os, sys
+path, cmd = sys.argv[1], sys.argv[2]
+data = {}
+if os.path.isfile(path):
+    try:
+        with open(path, encoding="utf-8") as f:
+            data = json.load(f)
+    except Exception:
+        data = {}
+hooks = data.setdefault("hooks", {})
+ss = hooks.setdefault("SessionStart", [])
+def has_cmd(entries):
+    for e in entries:
+        for h in e.get("hooks", []):
+            if "check-skill-deps.mjs" in h.get("command", ""):
+                return True
+    return False
+if not has_cmd(ss):
+    ss.append({"hooks": [{"type": "command", "command": cmd}]})
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=2)
+        f.write("\n")
+    print("registered")
+else:
+    print("present")
+PY
+  ok "SessionStart dependency-check hook ensured in $SETTINGS_FILE"
 fi
 
 # ── Done ──────────────────────────────────────────────────────────────
 echo ""
-echo "============================"
-echo "Install complete."
+echo "================================="
+echo "Install complete — profile: $PROFILE"
 echo ""
 echo "Next:"
 for sys in "${SYSTEMS[@]}"; do
@@ -517,17 +614,16 @@ for sys in "${SYSTEMS[@]}"; do
       echo "  • Asana: first-party MCP registered as 'asana'. If you skipped auth above,"
       echo "    run: python3 $SCRIPTS_DIR/asana_ops.py --auth (OAuth) or add ASANA_PAT=... to $ENV_FILE"
       ;;
-    linear)
-      echo "  • Linear MCP: first MCP operation in Claude Code will prompt for OAuth"
-      ;;
-    jira)
-      echo "  • Jira (Atlassian Rovo) MCP: first MCP operation in Claude Code will prompt for OAuth"
-      ;;
-    shortcut)
-      echo "  • Shortcut: token in $ENV_FILE is used by the script — no further setup"
-      ;;
+    linear)  echo "  • Linear MCP: first MCP operation in Claude Code will prompt for OAuth" ;;
+    jira)    echo "  • Jira (Atlassian Rovo) MCP: first MCP operation will prompt for OAuth" ;;
+    shortcut) echo "  • Shortcut: token in $ENV_FILE is used by the script — no further setup" ;;
   esac
 done
-echo "  • Open Claude Code and try: 'add a ticket about X to <project>'"
-echo "  • Re-run anytime to update: curl -sSL https://raw.githubusercontent.com/fractionwork/pm-skills/main/install.sh | bash"
+if [[ $ENGINEER -eq 1 ]]; then
+  echo "  • Engineer profile: workflow skills (create-pr, pr-review, next-task, …) read"
+  echo "    project substrate (docs, scripts, scaffold) from each repo. Pull it with the"
+  echo "    'update-seed' skill inside a seeded project ('sync from seed')."
+fi
+echo "  • Restart Claude Code so it loads the new skills, agents, and MCP servers."
+echo "  • Re-run anytime to update: curl -sSL https://raw.githubusercontent.com/fractionwork/pm-skills/main/install.sh | bash -s -- --profile $PROFILE"
 echo ""
