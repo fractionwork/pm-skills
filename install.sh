@@ -20,6 +20,7 @@
 #   bash install.sh                          # interactive (prompts for profile + systems)
 #   bash install.sh --profile engineer       # full engineer profile
 #   bash install.sh --profile pm --systems=asana,shortcut
+#   bash install.sh --profile pm --systems=asana,ado    # mirror Azure DevOps → Asana
 #   bash install.sh --dry-run                # show what would change, do nothing
 #   bash install.sh --migrate-config         # normalize legacy ~/.claude symlinks
 #                                            # into the resolved config dir (backed up)
@@ -389,14 +390,15 @@ echo "3. Which PM systems do you use? (drives MCP + script install)"
 if [[ -n "$SYSTEMS_ARG" ]]; then
   IFS=',' read -ra SYSTEMS <<< "$SYSTEMS_ARG"
 else
-  echo "   Choose all that apply (space-separated, e.g. '1 2'):"
-  echo "     1) Asana   2) Shortcut   3) Linear   4) Jira"
+  echo "   Choose all that apply (space-separated, e.g. '1 5'):"
+  echo "     1) Asana   2) Shortcut   3) Linear   4) Jira   5) Azure DevOps"
+  echo "   (Azure DevOps mirrors into Asana — pick 1 + 5 to sync ADO → an Asana board.)"
   echo ""
   if has_tty; then
     read -rp "  > " choice </dev/tty
   else
     err "Interactive prompt needed but no terminal available."
-    err "  Run with --systems=asana,shortcut (or similar) to skip."
+    err "  Run with --systems=asana,ado (or similar) to skip."
     exit 1
   fi
   SYSTEMS=()
@@ -406,9 +408,24 @@ else
       2) SYSTEMS+=(shortcut) ;;
       3) SYSTEMS+=(linear) ;;
       4) SYSTEMS+=(jira) ;;
+      5) SYSTEMS+=(ado) ;;
       *) warn "ignoring unknown choice: $c" ;;
     esac
   done
+fi
+
+# Normalize --systems aliases (azure/azure-devops/devops → ado).
+for i in "${!SYSTEMS[@]}"; do
+  case "${SYSTEMS[$i]}" in
+    azure|azure-devops|azuredevops|devops) SYSTEMS[$i]=ado ;;
+  esac
+done
+
+# ADO mirrors INTO Asana via asana_ops.py — it needs the Asana script path even
+# if the user didn't pick Asana explicitly. Pull asana in as a dependency.
+ADO_NEEDS_ASANA=0
+if printf '%s\n' "${SYSTEMS[@]}" | grep -qx ado && ! printf '%s\n' "${SYSTEMS[@]}" | grep -qx asana; then
+  ADO_NEEDS_ASANA=1
 fi
 
 if [[ ${#SYSTEMS[@]} -eq 0 ]]; then
@@ -452,8 +469,21 @@ for sys in "${SYSTEMS[@]}"; do
       do_step "cp '$BUNDLE_DIR/scripts/shortcut_ops.py' '$SCRIPTS_DIR/shortcut_ops.py'"
       ok "script: shortcut_ops.py"
       ;;
+    ado)
+      do_step "cp '$BUNDLE_DIR/scripts/ado_auth.py' '$SCRIPTS_DIR/ado_auth.py'"
+      ok "script: ado_auth.py"
+      do_step "cp '$BUNDLE_DIR/scripts/ado_asana_sync.py' '$SCRIPTS_DIR/ado_asana_sync.py'"
+      ok "script: ado_asana_sync.py"
+      ;;
   esac
 done
+
+# ADO syncs into Asana via asana_ops.py — ensure it's present even when the
+# user picked ADO without Asana.
+if [[ $ADO_NEEDS_ASANA -eq 1 ]]; then
+  do_step "cp '$BUNDLE_DIR/scripts/asana_ops.py' '$SCRIPTS_DIR/asana_ops.py'"
+  ok "script: asana_ops.py (required by ado_asana_sync.py)"
+fi
 
 if [[ $ENGINEER -eq 1 ]]; then
   if [[ -f "$BUNDLE_DIR/scripts/pr-watch-state.mjs" ]]; then
@@ -532,6 +562,45 @@ setup_token() {
   ok "$var saved"
 }
 
+# ADO PATs are org-scoped and stored in ~/.claude/.ado-credentials.json (chmod
+# 600) via ado_auth.py — NOT in .env. The PAT is read from stdin (never argv)
+# and never echoed. One PAT per org URL serves every project + skill.
+setup_ado_pat() {
+  local auth="$SCRIPTS_DIR/ado_auth.py"
+  echo ""
+  echo "   Azure DevOps PAT (minimal scope: Work Items → Read)"
+  echo "   Create at: https://dev.azure.com/<org>/_usersSettings/tokens"
+  if ! has_tty; then
+    warn "no terminal — store later: echo -n '<PAT>' | python3 $auth --set-pat https://dev.azure.com/<org>"
+    return
+  fi
+  local org=""
+  read -rp "   ADO org URL (e.g. https://dev.azure.com/<org>, blank to skip): " org </dev/tty
+  if [[ -z "$org" ]]; then
+    warn "skipped — store later: echo -n '<PAT>' | python3 $auth --set-pat <org-url>"
+    return
+  fi
+  if python3 "$auth" --list 2>/dev/null | grep -q "^${org%/}	"; then
+    say "ADO PAT for ${org%/} already stored — skipping (rotate: python3 $auth --set-pat ${org%/})"
+    return
+  fi
+  local pat=""
+  read -rsp "   Paste PAT (hidden, blank to skip): " pat </dev/tty; echo ""
+  if [[ -z "$pat" ]]; then
+    warn "skipped — store later: echo -n '<PAT>' | python3 $auth --set-pat ${org%/}"
+    return
+  fi
+  if [[ $DRY_RUN -eq 1 ]]; then
+    say "(dry-run) echo -n <PAT> | python3 '$auth' --set-pat '${org%/}' --scope 'Work Items: Read' --note installer"
+    return
+  fi
+  if printf '%s' "$pat" | python3 "$auth" --set-pat "${org%/}" --scope "Work Items: Read" --note "installer" >/dev/null; then
+    ok "ADO PAT stored for ${org%/} (~/.claude/.ado-credentials.json, chmod 600)"
+  else
+    warn "failed to store PAT — retry: echo -n '<PAT>' | python3 $auth --set-pat ${org%/}"
+  fi
+}
+
 for sys in "${SYSTEMS[@]}"; do
   case "$sys" in
     asana)
@@ -571,6 +640,9 @@ for sys in "${SYSTEMS[@]}"; do
       ;;
     shortcut)
       setup_token SHORTCUT_API_TOKEN "https://app.shortcut.com/settings/account/api-tokens"
+      ;;
+    ado)
+      setup_ado_pat
       ;;
     linear|jira)
       say "$sys: MCP OAuth happens on first use inside Claude Code — nothing to set up here"
@@ -717,6 +789,11 @@ for sys in "${SYSTEMS[@]}"; do
     linear)  echo "  • Linear MCP: first MCP operation in Claude Code will prompt for OAuth" ;;
     jira)    echo "  • Jira (Atlassian Rovo) MCP: first MCP operation will prompt for OAuth" ;;
     shortcut) echo "  • Shortcut: token in $ENV_FILE is used by the script — no further setup" ;;
+    ado)
+      echo "  • Azure DevOps: PAT stored per-org in ~/.claude/.ado-credentials.json. Configure"
+      echo "    the mirror (org/project/people/board) with the 'ado-asana-sync' skill, then"
+      echo "    dry-run: python3 $SCRIPTS_DIR/ado_asana_sync.py --dry-run"
+      ;;
   esac
 done
 if [[ $ENGINEER -eq 1 ]]; then

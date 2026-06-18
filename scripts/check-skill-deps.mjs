@@ -184,8 +184,16 @@ function hasTool(name) {
   });
 }
 
+// When walking user-level skills (--skills-dir ~/.claude/skills), a skill's
+// requires_files may point at EITHER project substrate (scripts/pr-audit.mjs,
+// resolved against ROOT) OR a co-installed user-level operator script
+// (scripts/ado_auth.py, resolved against ~/.claude). Accept a hit in either
+// place so user-level skills don't flag their own user scripts as missing.
+const USER_BASE = SKILLS_DIR_OVERRIDE ? dirname(SKILLS_BASE) : null;
 function hasFile(relPath) {
-  return existsSync(join(ROOT, relPath));
+  if (existsSync(join(ROOT, relPath))) return true;
+  if (USER_BASE && existsSync(join(USER_BASE, relPath))) return true;
+  return false;
 }
 
 function hasSkill(name) {
