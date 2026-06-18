@@ -77,6 +77,11 @@ The installer only touches the section between the
 `<!-- BEGIN: fraction-pm-skills -->` markers in this file. Anything you
 added above or below those markers is preserved.
 
+If you've relocated Claude Code's config with `CLAUDE_CONFIG_DIR`, the installer
+detects it and installs there (not blindly into `~/.claude`). Worked around an
+older split install by symlinking config-dir entries back to `~/.claude`? Add
+`--migrate-config` to clean those up (originals backed up first).
+
 ## Where things live
 
 - Skills: `~/.claude/skills/` (e.g. `~/.claude/skills/add-card/SKILL.md`)
