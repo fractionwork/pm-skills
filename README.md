@@ -74,6 +74,13 @@ bash install.sh --profile engineer --systems=asana,shortcut,linear
 - **Operating rules + skill index** → `~/.claude/CLAUDE.md` (between `<!-- BEGIN/END: fraction-pm-skills -->` markers)
 - **Tokens** → `~/.claude/.env` (chmod 600 — never commit, never share)
 
+> **Custom config directory?** If you've relocated Claude Code's config with
+> `CLAUDE_CONFIG_DIR`, the installer honors it automatically — everything above
+> installs into that directory (the first entry, if it's a list) instead of
+> `~/.claude`, matching where `claude mcp add --scope user` writes. The
+> install summary prints `Claude home ready: <dir> (from CLAUDE_CONFIG_DIR)` so
+> you can confirm. Set `CLAUDE_HOME` to override the target explicitly.
+
 ## Two tiers (engineers)
 
 These skills are **operator capability** and live at the user level. The

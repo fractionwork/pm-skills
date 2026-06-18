@@ -58,12 +58,16 @@ here. This skill owns Tier-2 *substrate* only. The script name
    `seed_managed: false`:
 
    ```bash
+   # Honor a relocated Claude config dir (CLAUDE_CONFIG_DIR; first entry if a
+   # list) — match where the installer put the user-level skills. Falls back
+   # to ~/.claude.
+   cc="${CLAUDE_CONFIG_DIR%%[,:]*}"; cc="${cc:-$HOME/.claude}"
    ts="$(date +%Y%m%d-%H%M%S)"; bak=".claude/.backup/$ts-migrate"
    for d in .claude/skills/*/; do
      [ -d "$d" ] || continue
      n="$(basename "$d")"
      # present at user level AND not deliberately project-owned?
-     if [ -d "$HOME/.claude/skills/$n" ] \
+     if [ -d "$cc/skills/$n" ] \
         && ! awk '/^---$/{x++;next} x==1' "$d/SKILL.md" 2>/dev/null | grep -Eq '^seed_managed:[[:space:]]*false'; then
        mkdir -p "$bak/skills"; cp -R "$d" "$bak/skills/$n"; rm -rf "$d"
        echo "  removed stale project skill: $n (now user-level; backup in $bak)"
@@ -71,8 +75,8 @@ here. This skill owns Tier-2 *substrate* only. The script name
    done
    ```
 
-   Do the equivalent for `.claude/agents/*.md` vs `~/.claude/agents/`. Report
-   what was removed. If `~/.claude/skills/` is empty (user hasn't installed the
+   Do the equivalent for `.claude/agents/*.md` vs `$cc/agents/`. Report
+   what was removed. If `$cc/skills/` is empty (user hasn't installed the
    Tier-1 bundle yet), **do not remove anything** — instead tell them to run the
    installer first, or their project would lose those skills entirely.
 

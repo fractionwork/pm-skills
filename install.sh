@@ -94,7 +94,24 @@ while [[ $# -gt 0 ]]; do
 done
 
 BUNDLE_DIR="$SCRIPT_PATH"
-CLAUDE_HOME="${CLAUDE_HOME:-$HOME/.claude}"
+# Resolve where Claude Code keeps its config. Precedence:
+#   1. CLAUDE_HOME      — explicit installer override (used by tests / advanced users)
+#   2. CLAUDE_CONFIG_DIR — Claude Code's OWN config-dir override; if a dev relocated
+#      their config here, `claude mcp add --scope user` writes there too, so we MUST
+#      install skills/agents/settings/.env to the same place or the install splits
+#      across two dirs and Claude never sees half of it.
+#   3. $HOME/.claude    — the default.
+# CLAUDE_CONFIG_DIR may hold a comma/colon-separated list; Claude Code treats the
+# first entry as the primary (writable) dir, so we do the same.
+if [[ -n "${CLAUDE_HOME:-}" ]]; then
+  CLAUDE_HOME_SOURCE="CLAUDE_HOME"
+elif [[ -n "${CLAUDE_CONFIG_DIR:-}" ]]; then
+  CLAUDE_HOME="${CLAUDE_CONFIG_DIR%%[,:]*}"
+  CLAUDE_HOME_SOURCE="CLAUDE_CONFIG_DIR"
+else
+  CLAUDE_HOME="$HOME/.claude"
+  CLAUDE_HOME_SOURCE="default"
+fi
 SKILLS_DIR="$CLAUDE_HOME/skills"
 SCRIPTS_DIR="$CLAUDE_HOME/scripts"
 AGENTS_DIR="$CLAUDE_HOME/agents"
@@ -245,7 +262,11 @@ else
 fi
 
 do_step "mkdir -p '$CLAUDE_HOME' '$SKILLS_DIR' '$SCRIPTS_DIR'"
-ok "Claude home ready: $CLAUDE_HOME"
+if [[ "$CLAUDE_HOME_SOURCE" == "CLAUDE_CONFIG_DIR" ]]; then
+  ok "Claude home ready: $CLAUDE_HOME  (from CLAUDE_CONFIG_DIR)"
+else
+  ok "Claude home ready: $CLAUDE_HOME"
+fi
 
 # ── Step 2: Profile selection ────────────────────────────────────────
 echo ""
