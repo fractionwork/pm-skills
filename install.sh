@@ -21,6 +21,8 @@
 #   bash install.sh --profile engineer       # full engineer profile
 #   bash install.sh --profile pm --systems=asana,shortcut
 #   bash install.sh --dry-run                # show what would change, do nothing
+#   bash install.sh --migrate-config         # normalize legacy ~/.claude symlinks
+#                                            # into the resolved config dir (backed up)
 #
 #   # Curl one-liner (auto-clones the repo into a tmp dir):
 #   curl -sSL https://raw.githubusercontent.com/fractionwork/pm-skills/main/install.sh | bash
@@ -72,11 +74,13 @@ if [[ -z "$SCRIPT_PATH" ]] || [[ ! -d "$SCRIPT_PATH/skills" ]]; then
 fi
 
 DRY_RUN=0
+MIGRATE_CONFIG=0
 SYSTEMS_ARG=""
 PROFILE=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --dry-run) DRY_RUN=1 ;;
+    --migrate-config) MIGRATE_CONFIG=1 ;;
     --systems=*) SYSTEMS_ARG="${1#--systems=}" ;;
     --systems) shift; SYSTEMS_ARG="${1:-}" ;;
     --profile=*) PROFILE="${1#--profile=}" ;;
@@ -137,6 +141,80 @@ do_step() {
 # silently blocks re-registering a server to swap its env (e.g. OAuth → PAT).
 # Remove first so every add below is genuinely idempotent. No-op if absent.
 mcp_reset() { do_step "claude mcp remove '$1' >/dev/null 2>&1 || true"; }
+
+# ── Legacy symlink reconciliation ───────────────────────────────────────
+# Installs predating CLAUDE_CONFIG_DIR support wrote into ~/.claude even when
+# Claude Code read from a custom dir. Some users bridged that by symlinking the
+# config dir's entries (skills/, scripts/, …) back to ~/.claude. Now that we
+# install straight into the resolved dir, those symlinks are redundant and keep
+# the real content indirected through ~/.claude. Detect them and — only when
+# asked (--migrate-config or an interactive yes) — dereference each into a real
+# file/dir in place, backing up first. The install that follows then refreshes
+# the seed files. Install works fine through the symlinks if left alone, so this
+# is pure hygiene and never runs unprompted.
+reconcile_config() {
+  local targets=(skills scripts agents CLAUDE.md settings.json .env)
+  local found=() t
+
+  # Whole config dir is a symlink (often → ~/.claude): no real split, the
+  # install writes through it. Report and leave it — restructuring a user's
+  # entire config dir is not ours to do.
+  if [[ -L "$CLAUDE_HOME" ]]; then
+    warn "config dir is a symlink: $CLAUDE_HOME → $(readlink "$CLAUDE_HOME")"
+    say  "    no split (install writes through it) — leaving as-is"
+    return 0
+  fi
+
+  for t in "${targets[@]}"; do
+    [[ -L "$CLAUDE_HOME/$t" ]] && found+=("$t")
+  done
+  [[ ${#found[@]} -eq 0 ]] && return 0
+
+  warn "Found ${#found[@]} legacy workaround symlink(s) under $CLAUDE_HOME:"
+  for t in "${found[@]}"; do
+    say "    $t → $(readlink "$CLAUDE_HOME/$t")"
+  done
+
+  if [[ $DRY_RUN -eq 1 ]]; then
+    say "    (dry-run) --migrate-config would dereference these into real files/dirs (backed up)"
+    return 0
+  fi
+
+  local act=$MIGRATE_CONFIG
+  if [[ $act -eq 0 ]] && has_tty; then
+    printf "  Normalize into real files/dirs now (originals backed up)? [y/N] "
+    local ans=""; read -r ans </dev/tty || ans=""
+    [[ "$ans" =~ ^[Yy] ]] && act=1
+  fi
+  if [[ $act -eq 0 ]]; then
+    say "    leaving symlinks in place (install still works through them)"
+    say "    to clean up later: re-run with --migrate-config"
+    return 0
+  fi
+
+  local bak="$CLAUDE_HOME/.backup/$(date +%Y%m%d-%H%M%S)-config-migrate"
+  mkdir -p "$bak"
+  for t in "${found[@]}"; do
+    local p="$CLAUDE_HOME/$t" link_tgt
+    link_tgt="$(readlink "$p")"
+    if [[ -d "$p" ]]; then
+      # dir target: snapshot contents through the link, then replace the link
+      # with a real dir holding those contents (user extras survive; the seed
+      # install overwrites the seed-managed files afterward).
+      mkdir -p "$bak/$t"
+      cp -R "$p/." "$bak/$t/" 2>/dev/null || true
+      rm -f "$p"; mkdir -p "$p"
+      cp -R "$bak/$t/." "$p/" 2>/dev/null || true
+    elif [[ -f "$p" ]]; then
+      cp "$p" "$bak/$t"
+      rm -f "$p"; cp "$bak/$t" "$p"
+    else
+      rm -f "$p"   # dangling link — nothing to preserve
+    fi
+    ok  "normalized $t (was → $link_tgt; backup: $bak/$t)"
+    say "    orphaned source remains at $link_tgt — delete if nothing else uses it"
+  done
+}
 
 # The official `mcp` SDK requires Python >= 3.10. Stock macOS and older Xcode
 # Command Line Tools ship python3 = 3.9, where EVERY pip method fails. Echo the
@@ -261,6 +339,7 @@ else
   warn "    python3 -m pip install --user requests    (or --break-system-packages)"
 fi
 
+reconcile_config
 do_step "mkdir -p '$CLAUDE_HOME' '$SKILLS_DIR' '$SCRIPTS_DIR'"
 if [[ "$CLAUDE_HOME_SOURCE" == "CLAUDE_CONFIG_DIR" ]]; then
   ok "Claude home ready: $CLAUDE_HOME  (from CLAUDE_CONFIG_DIR)"

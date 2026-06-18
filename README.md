@@ -80,6 +80,15 @@ bash install.sh --profile engineer --systems=asana,shortcut,linear
 > `~/.claude`, matching where `claude mcp add --scope user` writes. The
 > install summary prints `Claude home ready: <dir> (from CLAUDE_CONFIG_DIR)` so
 > you can confirm. Set `CLAUDE_HOME` to override the target explicitly.
+>
+> **Already worked around it with symlinks?** Earlier installs wrote into
+> `~/.claude` regardless of `CLAUDE_CONFIG_DIR`; some people bridged the gap by
+> symlinking the config dir's entries (`skills/`, `CLAUDE.md`, …) back to
+> `~/.claude`. Re-run with `--migrate-config` and the installer dereferences
+> those symlinks into real files/dirs in the config dir (backing the originals
+> up under `<config-dir>/.backup/`), then installs cleanly. It only acts when
+> symlinks are detected and only with the flag (or an interactive yes) — install
+> works through the symlinks untouched otherwise, so this is optional hygiene.
 
 ## Two tiers (engineers)
 
