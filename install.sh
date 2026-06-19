@@ -255,21 +255,28 @@ install_mcp_deps() {
     MCP_PYTHON="$venv/bin/python"
     return
   fi
+  # Success is verified by importing the deps, not by pip's exit code — piping
+  # pip through sed (to stream/indent progress) would otherwise mask it.
+  say "→ Installing the Asana MCP's Python deps (mcp + requests) into a venv."
+  say "  One-time; downloads from PyPI and can take a minute. Live progress:"
   rm -rf "$venv" 2>/dev/null || true
-  if "$py" -m venv "$venv" >/dev/null 2>&1 && "$venv/bin/pip" install -q -r "$req" >/dev/null 2>&1; then
-    MCP_PYTHON="$venv/bin/python"
-    ok "MCP deps installed in venv ($("$py" --version 2>&1))"
-    return
+  if "$py" -m venv "$venv" >/dev/null 2>&1; then
+    "$venv/bin/pip" install --disable-pip-version-check -r "$req" 2>&1 | sed 's/^/    /' || true
+    if "$venv/bin/python" -c 'import mcp, requests' >/dev/null 2>&1; then
+      MCP_PYTHON="$venv/bin/python"
+      ok "MCP deps installed in venv ($("$py" --version 2>&1))"
+      return
+    fi
   fi
-  warn "venv install failed; underlying error:"
-  { "$py" -m venv "$venv" && "$venv/bin/pip" install -r "$req"; } 2>&1 | tail -8 | sed 's/^/    /' || true
-  if "$py" -m pip install --user -q -r "$req" >/dev/null 2>&1 \
-     || "$py" -m pip install --user --break-system-packages -q -r "$req" >/dev/null 2>&1; then
+  warn "venv install incomplete — falling back to a user-site install:"
+  if { "$py" -m pip install --user -r "$req" 2>&1 \
+       || "$py" -m pip install --user --break-system-packages -r "$req" 2>&1; } | sed 's/^/    /' \
+     && "$py" -c 'import mcp, requests' >/dev/null 2>&1; then
     MCP_PYTHON="$py"
     ok "MCP deps installed (user site)"
   else
     MCP_PYTHON="$py"
-    warn "could not install MCP deps automatically (see error above)."
+    warn "could not install MCP deps automatically (see output above)."
     warn "    Manual: $py -m venv '$venv' && '$venv/bin/pip' install -r '$req'"
     warn "  The asana MCP is registered but won't start until deps exist."
   fi
