@@ -375,7 +375,11 @@ esac
 ok "Profile: $PROFILE"
 
 # Resolve the skill set for this profile up front.
-mapfile -t PROFILE_SKILLS < <(skills_for_profile "$PROFILE")
+# (read loop, not `mapfile` — macOS ships bash 3.2, which has no mapfile/readarray.)
+PROFILE_SKILLS=()
+while IFS= read -r _skill; do
+  [[ -n "$_skill" ]] && PROFILE_SKILLS+=("$_skill")
+done < <(skills_for_profile "$PROFILE")
 if [[ ${#PROFILE_SKILLS[@]} -eq 0 ]]; then
   err "no skills matched profile '$PROFILE' — is the bundle complete?"
   exit 1
