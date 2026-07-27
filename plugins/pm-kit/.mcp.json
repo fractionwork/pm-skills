@@ -1,0 +1,6 @@
+{
+  "asana": {
+    "command": "${CLAUDE_PLUGIN_ROOT}/skills/_shared/pm-python.sh",
+    "args": ["${CLAUDE_PLUGIN_ROOT}/skills/_shared/asana_mcp.py"]
+  }
+}
