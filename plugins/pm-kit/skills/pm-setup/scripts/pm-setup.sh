@@ -223,6 +223,18 @@ else
     # NOT explorer.exe: it resolves its argument as a PATH first, and from a WSL
     # working directory Windows can't map it gives up and opens a File Explorer
     # window instead of the browser.
+    # A BROWSER of explorer.exe is treated as unset: it is a known-bad value that
+    # opens a File Explorer window rather than a browser, and earlier guidance
+    # (including ours) told people to set it. Honouring it would silently defeat
+    # the opener below on exactly the machines that need it.
+    case "${BROWSER:-}" in
+      explorer|explorer.exe|*/explorer.exe)
+        say "ignoring BROWSER=$BROWSER — it opens File Explorer, not a browser"
+        say "  remove it from your shell profile if you set it there"
+        BROWSER=""
+        ;;
+    esac
+
     if [ -z "${BROWSER:-}" ] && [ -x "$SHARED/open-url.sh" ]; then
       export BROWSER="$SHARED/open-url.sh"
       [ -n "${WSL_DISTRO_NAME:-}${WSL_INTEROP:-}" ] \
