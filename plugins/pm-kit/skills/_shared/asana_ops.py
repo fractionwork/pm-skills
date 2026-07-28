@@ -916,7 +916,22 @@ def hygiene_audit(project_gid, dry_run=False):
             api("POST", f"/projects/{project_gid}/sections",
                 {"name": sname}, dry_run=dry_run)
             fixes += 1
-    extra_sections = existing_sections - set(STANDARD_SECTIONS)
+    # Asana's placeholder section, called out separately from genuine
+    # non-standard ones: a column somebody deliberately added is information,
+    # this is just litter from project creation and every board has it.
+    placeholders = {s for s in existing_sections if is_default_section(s)}
+    if placeholders:
+        result = remove_default_sections(project_gid, dry_run=dry_run)
+        for sname in result.get("removed", []):
+            print(f"   ❌ {sname} — Asana's placeholder section, removing...")
+            fixes += 1
+        for sname in result.get("kept_non_empty", []):
+            # Deleting a section in Asana takes its tasks with it, so this one is
+            # reported and left alone however untidy it looks.
+            print(f"   ⚠ {sname} — Asana's placeholder section, but it HAS TASKS")
+            print("       move them to a real section, then re-run to remove it")
+
+    extra_sections = existing_sections - set(STANDARD_SECTIONS) - placeholders
     if extra_sections:
         print(f"   Non-standard sections: {len(extra_sections)}")
         for sname in sorted(extra_sections):
@@ -1573,6 +1588,64 @@ def attach_workspace_fields(project_gid, workspace=None, dry_run=False) -> dict:
     return {"source": source, "added": sorted(added), "already_present": sorted(skipped)}
 
 
+# Asana creates one section automatically with every new project and gives it a
+# placeholder name. Nobody chose it, nothing is filed in it deliberately, and on
+# a board it renders as an empty unnamed column sitting to the left of INBOX.
+#
+# The name varies by client and project view, so match a set rather than one
+# literal. Matching is case- and whitespace-insensitive because the API and the
+# UI disagree on capitalisation ("Untitled section" vs "Untitled Section").
+# Kept deliberately short. This list drives a DELETE, so it holds only names
+# Asana itself generates — not every name that looks like a placeholder. "New
+# Section", for instance, is something a person plausibly typed, and an empty
+# section someone made on purpose is not ours to remove.
+DEFAULT_SECTION_NAMES = {
+    "untitled section", "untitled", "(no section)", "no section",
+}
+
+
+def is_default_section(name) -> bool:
+    """True for Asana's auto-created placeholder section, never for one of ours."""
+    n = (name or "").strip().casefold()
+    if not n or n in {s.casefold() for s in STANDARD_SECTIONS}:
+        return False
+    return n in DEFAULT_SECTION_NAMES
+
+
+def section_is_empty(section_gid) -> bool:
+    """True when a section holds no tasks.
+
+    Asked with limit=1: this only ever needs to know empty vs not, and a section
+    someone has been filing into for a year should not cost a full pagination.
+    """
+    resp = api("GET", f"/sections/{section_gid}/tasks",
+               params={"limit": 1, "opt_fields": "gid"})
+    return not ((resp or {}).get("data") or [])
+
+
+def remove_default_sections(project_gid, dry_run=False) -> dict:
+    """Delete Asana's placeholder section(s) from a project. Idempotent.
+
+    Deletes only a section that is BOTH placeholder-named and empty. A section
+    with tasks in it is reported instead: deleting one in Asana takes its tasks
+    with it, and someone may well have been filing real work into the column
+    nobody renamed. Reporting is recoverable; deleting is not.
+    """
+    resp = api("GET", f"/projects/{project_gid}/sections", params={"opt_fields": "name"})
+    sections = (resp or {}).get("data") or []
+    removed, occupied = [], []
+    for s in sections:
+        name, gid = s.get("name", ""), s.get("gid")
+        if not gid or not is_default_section(name):
+            continue
+        if not section_is_empty(gid):
+            occupied.append(name)
+            continue
+        api("DELETE", f"/sections/{gid}", dry_run=dry_run)
+        removed.append(name)
+    return {"removed": removed, "kept_non_empty": occupied}
+
+
 def create_project(spec, dry_run=False):
     """Create a project (asana-bootstrap). `spec` keys: name (req), team (gid —
     required for org workspaces), workspace (gid; defaults to the active one),
@@ -1611,9 +1684,18 @@ def create_project(spec, dry_run=False):
     except Exception as e:  # noqa: BLE001 - never lose the gid
         fields = {"error": f"{type(e).__name__}: {e}"}
 
+    # Asana ships every new project with a placeholder section. It is empty at
+    # this point by definition, so this is the one moment removing it is
+    # unambiguously safe. Same reasoning as above: never fatal.
+    try:
+        sections = remove_default_sections(gid)
+    except Exception as e:  # noqa: BLE001
+        sections = {"error": f"{type(e).__name__}: {e}"}
+
     print(json.dumps({"ok": True, "project_gid": gid,
                       "permalink": f"https://app.asana.com/0/{gid}",
-                      "custom_fields": fields}))
+                      "custom_fields": fields,
+                      "default_sections": sections}))
 
 
 # ═══════════════════════════════════════════════════════

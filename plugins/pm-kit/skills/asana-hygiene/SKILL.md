@@ -33,6 +33,11 @@ This runs the full audit and auto-fixes:
 - **Admins:** adds Jeremy + Alyssia if missing
 - **Custom fields:** attaches 8 standard fields (Priority, Task Type, Story Points, Task Progress, Release, Sprint, Theme, Feature)
 - **Sections:** creates missing standard sections (INBOX → DONE)
+- **Asana's placeholder section:** every project is created with an auto-named section
+  ("Untitled section"). It is removed when empty, and **flagged rather than deleted when it holds
+  tasks** — deleting a section in Asana takes its tasks with it, and somebody may have been filing
+  real work into the column nobody renamed. Move them out, then re-run. Sections a person named,
+  including empty ones, are never touched; they show under "Non-standard sections" as information.
 - **Metadata:** reports missing start_on, due_on, notes (needs manual input)
 - **Priority / Task Type / Story Points / Release:** auto-fill **only for non-INBOX items** — INBOX is intentionally light (these get filled at the INBOX → BACKLOG promotion conversation, not before). Audit output labels these as "(excl. INBOX)" so the funnel stays honest.
 - **INBOX summary:** counts items awaiting stakeholder discussion

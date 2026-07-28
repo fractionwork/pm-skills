@@ -104,6 +104,12 @@ python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/asana_ops.py --attach-fields <proje
 
 That command is idempotent, and also fixes boards created before this behaviour existed.
 
+**Asana's placeholder section is removed too.** Every new project arrives with an auto-named
+section ("Untitled section") that renders as an empty unnamed column to the left of INBOX. It is
+empty at creation time by definition, so removing it then is unambiguously safe; the result is
+reported in `default_sections`. `asana-hygiene` does the same for existing boards, except that a
+placeholder holding tasks is flagged rather than deleted.
+
 If the workspace has standard project templates, **do not use them** — they ship with non-Fraction sections and fields that hygiene would then have to undo. The seed's standards are applied in Steps 4–6 directly.
 
 ## Step 4: Apply Fraction standards (one shell call)
