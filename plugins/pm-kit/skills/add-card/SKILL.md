@@ -23,7 +23,7 @@ The canonical hygiene rules live in `${CLAUDE_PLUGIN_ROOT}/skills/_shared/asana-
 
 ## Step 1: Resolve the target project
 
-If the user names the project ("add a ticket to ELEVAT3 about X"), resolve it via the Asana MCP's `list_projects` and match by name (or `python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/asana_ops.py --list-projects`; Shortcut/Linear equivalents for those systems).
+If the user names the project ("add a ticket to ELEVAT3 about X"), resolve it via the Asana MCP's `list_projects(scope="all")` and match by name — the default scope is only the projects you belong to, and a named board you are not a member of must still resolve (or `python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/asana_ops.py --list-projects`; Shortcut/Linear equivalents for those systems).
 
 If the user is ambiguous ("add a ticket about X"), check `.devhawk-work.json` for the active project. If still unclear, ask: "Which project — ELEVAT3, Paryani Construction, …?"
 

@@ -204,21 +204,48 @@ def search_tasks(project_gid: str, text: str):
 
 
 @mcp.tool()
-def list_projects():
-    """List projects this server can act on. When ASANA_ALLOWED_PROJECTS is set,
-    only those; otherwise all non-archived projects in the workspace."""
+def list_projects(scope: str = "mine"):
+    """List projects.
+
+    scope="mine" (default) — only projects you are a member of. Use this for
+    "list my projects", "what projects am I on", or any unqualified request:
+    a workspace can hold hundreds of boards and almost none of them are yours.
+
+    scope="all" — every non-archived project in the workspace. Use this only
+    when the user explicitly asks for all projects, or is looking for a board
+    they are not a member of.
+
+    When ASANA_ALLOWED_PROJECTS fences this server, that fence still applies and
+    scope filters within it.
+    """
+    if scope not in ("mine", "all"):
+        raise ValueError('scope must be "mine" or "all"')
+
     with contextlib.redirect_stdout(sys.stderr):
+        # `members` has to be requested explicitly and compared here: Asana's
+        # /projects endpoints take no member filter, so there is no way to push
+        # this down to the API.
+        fields = "name,archived,members.gid"
         if ALLOWED:
-            out = []
+            projects = []
             for g in sorted(ALLOWED):
-                r = ops.api("GET", f"/projects/{g}", params={"opt_fields": "name,archived"})
+                r = ops.api("GET", f"/projects/{g}", params={"opt_fields": fields})
                 if r:
-                    out.append(r["data"])
-            return out
-        ws = ops.resolve_workspace()
-        return [p for p in ops.paginate(f"/workspaces/{ws}/projects",
-                                        opt_fields="name,archived")
-                if not p.get("archived")]
+                    projects.append(r["data"])
+        else:
+            ws = ops.resolve_workspace()
+            projects = [p for p in ops.paginate(f"/workspaces/{ws}/projects",
+                                                opt_fields=fields)
+                        if not p.get("archived")]
+
+        if scope == "mine":
+            me = ops.me_gid()
+            projects = [p for p in projects
+                        if any(m.get("gid") == me for m in (p.get("members") or []))]
+
+    # members was fetched to filter on, not to report; returning it would put a
+    # user list on every row of an answer to "what are my projects".
+    return [{k: v for k, v in p.items() if k != "members"} for p in projects]
 
 
 @mcp.tool()

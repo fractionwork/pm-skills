@@ -42,9 +42,13 @@ If the request was terse ("create a board called ELEVAT4"), ask once for descrip
 Before creating anything, search the workspace for an existing project with a similar name.
 
 ```
-list_projects          # Asana MCP; then match by the proposed name's significant tokens
+list_projects(scope="all")   # Asana MCP; then match by the proposed name's significant tokens
 # (or: python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/asana_ops.py --list-projects)
 ```
+
+`scope="all"` is required here, not optional. The tool defaults to `"mine"` — the projects you are
+a member of — which is right for "what are my projects" and wrong for a duplicate check: the board
+you are about to collide with is most likely one somebody else created and you were never added to.
 
 Reuse `add-card` Step 2.5's signal model (significant-token overlap ≥50%, substring containment, same domain noun, same client/customer prefix). One signal alone is noise; two or more → surface as a likely duplicate.
 
@@ -81,7 +85,24 @@ python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/asana_ops.py --create-project '{"na
 python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/asana_ops.py --create-project '{"name":"<name>","team":"<team_gid>","notes":"<description>","default_view":"board"}'
 ```
 
-`--create-project` defaults `workspace` to the active one (override with a `"workspace"` key). It prints `{ok, project_gid, permalink}` — capture `project_gid`. Everything from Step 4 onward needs it.
+`--create-project` defaults `workspace` to the active one (override with a `"workspace"` key). It prints `{ok, project_gid, permalink, custom_fields}` — capture `project_gid`. Everything from Step 4 onward needs it.
+
+**Custom fields are attached as part of creation.** In Asana a custom field is defined on the
+workspace but stays invisible on a project until explicitly added, so a brand-new board has none of
+them and every card written to it silently drops its Theme / Feature / Story Points — there is no
+field on the project to set. `--create-project` now attaches them and reports what it did in
+`custom_fields`: `{source, added, already_present}`. `source` is `workspace.json` when
+`requiredFields` is configured (the curated set the board skills enforce) and `workspace` when it
+is not, in which case the fields are discovered from the workspace itself.
+
+If `custom_fields` comes back with an `error` key, the board was still created — field setup is
+deliberately non-fatal so a permissions problem can't cost you the project GID. Back-fill it with:
+
+```
+python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/asana_ops.py --attach-fields <project_gid>
+```
+
+That command is idempotent, and also fixes boards created before this behaviour existed.
 
 If the workspace has standard project templates, **do not use them** — they ship with non-Fraction sections and fields that hygiene would then have to undo. The seed's standards are applied in Steps 4–6 directly.
 

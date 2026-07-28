@@ -1504,6 +1504,75 @@ def find_user(query):
         print(f"{u['gid']}\t{u.get('name', '?')}\t{u.get('email', '')}")
 
 
+_ME_GID = None
+
+
+def me_gid() -> str:
+    """GID of the authenticated user, fetched once per process.
+
+    Used to answer "my projects" — Asana's /projects endpoint has no member
+    filter, so membership has to be compared client-side.
+    """
+    global _ME_GID
+    if _ME_GID is None:
+        resp = api("GET", "/users/me", params={"opt_fields": "gid"})
+        _ME_GID = ((resp or {}).get("data") or {}).get("gid", "")
+    return _ME_GID
+
+
+def workspace_custom_fields(workspace=None) -> dict:
+    """{gid: name} for every custom field defined in the workspace."""
+    ws = workspace or resolve_workspace()
+    out = {}
+    for cf in paginate(f"/workspaces/{ws}/custom_fields", opt_fields="name"):
+        if cf.get("gid"):
+            out[cf["gid"]] = cf.get("name") or cf["gid"]
+    return out
+
+
+def project_field_gids(project_gid) -> set:
+    """GIDs of the custom fields already attached to a project."""
+    resp = api("GET", f"/projects/{project_gid}",
+               params={"opt_fields": "custom_field_settings.custom_field.gid"})
+    if not resp or not isinstance(resp.get("data"), dict):
+        return set()
+    return {cfs.get("custom_field", {}).get("gid", "")
+            for cfs in resp["data"].get("custom_field_settings", [])}
+
+
+def attach_workspace_fields(project_gid, workspace=None, dry_run=False) -> dict:
+    """Attach the workspace's custom fields to a project. Idempotent.
+
+    WHY THIS EXISTS: in Asana a custom field is defined on the workspace but is
+    invisible on a project until it is explicitly added. A freshly created board
+    therefore has none of them, and every card written to it silently drops its
+    Theme/Feature/Story Points — the fields are simply not on the project to set.
+
+    Which fields: the curated set from workspace.json (requiredFields) when it is
+    configured, because that is the policy the board skills already enforce.
+    Otherwise every custom field defined in the workspace, discovered from the
+    API — so this still does the right thing on an unconfigured machine instead
+    of silently attaching nothing.
+    """
+    fields = required_fields()
+    source = "workspace.json"
+    if not fields:
+        fields = workspace_custom_fields(workspace)
+        source = "workspace"
+    attached = project_field_gids(project_gid)
+    added, skipped = [], []
+    for gid, name in fields.items():
+        if gid in attached:
+            skipped.append(name)
+            continue
+        # is_important surfaces the field in the task pane rather than burying it
+        # behind "show more fields", which is where the policy fields belong.
+        api("POST", f"/projects/{project_gid}/addCustomFieldSetting",
+            {"custom_field": gid, "is_important": True}, dry_run=dry_run)
+        added.append(name)
+    return {"source": source, "added": sorted(added), "already_present": sorted(skipped)}
+
+
 def create_project(spec, dry_run=False):
     """Create a project (asana-bootstrap). `spec` keys: name (req), team (gid —
     required for org workspaces), workspace (gid; defaults to the active one),
@@ -1529,8 +1598,22 @@ def create_project(spec, dry_run=False):
         print(json.dumps({"ok": False, "error": "create failed"}))
         sys.exit(1)
     gid = created["data"]["gid"]
+
+    # A new board starts with none of the workspace's custom fields attached, so
+    # the first card written to it would silently lose Theme/Feature/Story
+    # Points. Attach them now rather than leaving it to a later hygiene run.
+    #
+    # Non-fatal: the project exists and is usable, and reporting the created gid
+    # matters more than field setup. Losing the gid to an exception here would
+    # leave an orphaned board the caller never learns about.
+    try:
+        fields = attach_workspace_fields(gid, workspace=payload.get("workspace"))
+    except Exception as e:  # noqa: BLE001 - never lose the gid
+        fields = {"error": f"{type(e).__name__}: {e}"}
+
     print(json.dumps({"ok": True, "project_gid": gid,
-                      "permalink": f"https://app.asana.com/0/{gid}"}))
+                      "permalink": f"https://app.asana.com/0/{gid}",
+                      "custom_fields": fields}))
 
 
 # ═══════════════════════════════════════════════════════
@@ -1558,7 +1641,8 @@ def main():
     parser.add_argument("--create-task", metavar="JSON", help="Create a top-level task from a JSON spec (or '-' for stdin). Keys: name, notes, projects[], section, custom_fields{gid:val}, sprint[opt_gid], audit_tag(bool). Covers add-card's rich BACKLOG/INBOX creation — the surface the curated MCP omits. Prints JSON {ok,task_gid,permalink,warnings}.")
     parser.add_argument("--complete-task", metavar="TASK_GID", help="Mark a task complete (used by card-done; the curated MCP omits completion).")
     parser.add_argument("--find-user", metavar="QUERY", help="Find workspace users by name/email substring; prints gid<TAB>name<TAB>email. Used by add-comment to resolve @mentions.")
-    parser.add_argument("--create-project", metavar="JSON", help="Create a project from a JSON spec (or '-' for stdin). Keys: name, team, workspace, notes, public, default_view. Used by asana-bootstrap. Prints JSON {ok,project_gid,permalink}.")
+    parser.add_argument("--create-project", metavar="JSON", help="Create a project from a JSON spec (or '-' for stdin). Keys: name, team, workspace, notes, public, default_view. Used by asana-bootstrap. Attaches the workspace's custom fields to the new board. Prints JSON {ok,project_gid,permalink,custom_fields}.")
+    parser.add_argument("--attach-fields", metavar="PROJECT_GID", help="Attach the workspace's custom fields to an existing project (idempotent). New boards get this automatically via --create-project; this back-fills one that predates it. Prints JSON {source,added,already_present}.")
     parser.add_argument("--ensure-audit-tag", action="store_true", help=f"Idempotent: ensure the workspace-level '{ADD_CARD_AUDIT_TAG_NAME}' tag exists; prints its gid. Used by the add-card skill to stamp skill-created cards.")
     parser.add_argument("--list-workspaces", action="store_true", help="List the account's Asana workspaces (gid + name).")
     parser.add_argument("--set-workspace", metavar="WORKSPACE_GID", help="Persist the active workspace choice (for multi-workspace accounts). Both the CLI and the MCP server reuse it.")
@@ -1658,6 +1742,11 @@ def main():
 
     if args.create_project:
         create_project(_read_json_arg(args.create_project), args.dry_run)
+        return
+
+    if args.attach_fields:
+        print(json.dumps(attach_workspace_fields(args.attach_fields,
+                                                 dry_run=args.dry_run), indent=2))
         return
 
     if args.list_workspaces:
