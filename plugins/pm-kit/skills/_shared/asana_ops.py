@@ -7,15 +7,10 @@ Auth: PKCE OAuth (recommended) or PAT fallback.
 
 Usage:
   # First-time auth (opens browser, stores token locally):
-  python3 scripts/asana_ops.py --auth
+  python3 <pm-kit>/skills/_shared/asana_ops.py --auth
+  python3 <pm-kit>/skills/_shared/asana_ops.py --hygiene <PROJECT_GID>
 
-  # Run cleanup tracks:
-  python3 scripts/asana_ops.py --track A --dry-run
-  python3 scripts/asana_ops.py --track A
-  python3 scripts/asana_ops.py --track all --dry-run
-
-Tracks: A (archive), B (portfolios), C (custom fields),
-        D (Paryani fixes), E (PronovosSample cleanup)
+Run with no arguments for the full command list.
 """
 
 import argparse
@@ -47,8 +42,18 @@ UPLOAD_TIMEOUT = 120   # attachment uploads (larger payloads)
 # Client ID is public by design; client secret is required by Asana's
 # token exchange but is not truly secret in a CLI (source is readable).
 # Security comes from the user's browser consent + PKCE verifier.
-ASANA_CLIENT_ID = "1214192066020436"
-ASANA_CLIENT_SECRET = "e2039abfba03f82ac88c79cd7568bbcc"
+# The OAuth app identity is NOT shipped. It used to be hardcoded here, which
+# meant it travelled into the public pm-skills marketplace — and it also meant
+# this module only ever worked against one Asana app.
+#
+# Resolution: env → ~/.devhawk/pm/workspace.json → absent. Absent is fine: the
+# PAT path (ASANA_PAT / ASANA_ACCESS_TOKEN) needs no app registration at all,
+# and OAuth reports what to set rather than failing obscurely.
+def _oauth_app() -> tuple:
+    """(client_id, client_secret) — env wins, then workspace.json, then empty."""
+    cfg = _workspace_config().get("oauth", {})
+    return (os.environ.get("ASANA_CLIENT_ID") or cfg.get("clientId", ""),
+            os.environ.get("ASANA_CLIENT_SECRET") or cfg.get("clientSecret", ""))
 ASANA_AUTH_URL = "https://app.asana.com/-/oauth_authorize"
 ASANA_TOKEN_URL = "https://app.asana.com/-/oauth_token"
 CALLBACK_PORT = 8372
@@ -106,6 +111,42 @@ def _cred_path(env_var: str, filename: str) -> Path:
 
 
 TOKEN_FILE = _cred_path("ASANA_TOKEN_FILE", "asana-token.json")
+WORKSPACE_CONFIG = _cred_path("ASANA_WORKSPACE_CONFIG", "workspace.json")
+
+
+def _workspace_config() -> dict:
+    """Workspace-specific settings, loaded once from ~/.devhawk/pm/workspace.json.
+
+    Custom-field GIDs, the required-admin list and the OAuth app identity are all
+    specific to ONE Asana workspace. Hardcoding them shipped our workspace's ids
+    (and an OAuth client secret) to every user, and made the kit unusable against
+    any other workspace. See workspace.example.json for the shape.
+    """
+    global _WS_CACHE
+    if _WS_CACHE is None:
+        try:
+            _WS_CACHE = json.loads(WORKSPACE_CONFIG.read_text())
+        except (OSError, ValueError):
+            _WS_CACHE = {}
+    return _WS_CACHE
+
+
+_WS_CACHE = None
+
+
+def required_fields() -> dict:
+    """{gid: name} for the custom fields every project must carry.
+
+    From config when present. Otherwise empty — callers degrade to reporting
+    that no field policy is configured rather than attaching another
+    workspace's field GIDs, which would fail with an opaque 400.
+    """
+    return _workspace_config().get("requiredFields", {})
+
+
+def required_admins() -> list:
+    """[{name, gid, email}] — who must be an Admin on every project."""
+    return _workspace_config().get("requiredAdmins", [])
 
 
 class AsanaAuthError(Exception):
@@ -138,8 +179,8 @@ START_TIME = None
 # ═══════════════════════════════════════════════════════
 
 def get_client_id():
-    """Get client ID — hardcoded for the Fraction DevHawk app."""
-    return os.environ.get("ASANA_CLIENT_ID", ASANA_CLIENT_ID)
+    """OAuth client id — env, then ~/.devhawk/pm/workspace.json. Never shipped."""
+    return _oauth_app()[0]
 
 
 def generate_pkce():
@@ -154,9 +195,19 @@ def oauth_auth():
     """Run PKCE OAuth flow: open browser, catch callback, exchange for tokens."""
     client_id = get_client_id()
     if not client_id:
-        print("Error: ASANA_CLIENT_ID not set.")
-        print("Set it in .env.local or as an env var.")
-        print("Get it from: https://app.asana.com/0/my-apps → Fraction DevHawk → Client ID")
+        print("No Asana OAuth app configured.", file=sys.stderr)
+        print("  Easiest path — skip OAuth entirely and use a personal access token:",
+              file=sys.stderr)
+        print("      export ASANA_PAT=<token>        # app.asana.com → My settings → Apps",
+              file=sys.stderr)
+        print("  Or register an app at https://app.asana.com/0/my-apps (redirect",
+              file=sys.stderr)
+        print("  http://localhost:8372/callback) and set ASANA_CLIENT_ID +",
+              file=sys.stderr)
+        print("  ASANA_CLIENT_SECRET, or the oauth block in", file=sys.stderr)
+        print(f"      {WORKSPACE_CONFIG}", file=sys.stderr)
+        print("  See workspace.example.json in this directory for the shape.",
+              file=sys.stderr)
         sys.exit(1)
 
     verifier, challenge = generate_pkce()
@@ -224,7 +275,7 @@ def oauth_auth():
     token_data = {
         "grant_type": "authorization_code",
         "client_id": client_id,
-        "client_secret": ASANA_CLIENT_SECRET,
+        "client_secret": _oauth_app()[1],
         "redirect_uri": f"http://localhost:{CALLBACK_PORT}/callback",
         "code": auth_code[0],
         "code_verifier": verifier,
@@ -254,7 +305,7 @@ def refresh_token():
     resp = requests.post(ASANA_TOKEN_URL, data={
         "grant_type": "refresh_token",
         "client_id": client_id,
-        "client_secret": ASANA_CLIENT_SECRET,
+        "client_secret": _oauth_app()[1],
         "refresh_token": tokens["refresh_token"],
     }, timeout=HTTP_TIMEOUT)
     if resp.status_code != 200:
@@ -484,20 +535,13 @@ def attach_file(task_gid, file_path, dry_run=False):
 # Hygiene audit + fix
 # ═══════════════════════════════════════════════════════
 
-REQUIRED_FIELDS = {
-    "1214202045134883": "Fraction Priority",
-    "1214202179972377": "Fraction Task Type",
-    "1208941031000919": "Story Points",
-    "1204575864766299": "Task Progress",
-    "1214267151463854": "Release",
-    "1205043346485340": "Sprint",
-    "1215430560993891": "Theme",    # text — per-project theme (free string)
-    "1215357133051817": "Feature",  # text — the epic/feature a task supports (flat-model)
-}
-REQUIRED_ADMINS = {
-    "1206452951803612": "Jeremy King",
-    "1204497823875018": "Alyssia Maluda",
-}
+# Field GIDs live in ~/.devhawk/pm/workspace.json, not here — see
+# required_fields() and workspace.example.json.
+# Who must be Admin on every project — {gid: name}, from workspace.json.
+# Empty when unconfigured: hygiene then reports the admin COUNT rather than
+# asserting somebody else's team.
+def required_admins_map() -> dict:
+    return {a["gid"]: a.get("name", a["gid"]) for a in required_admins() if a.get("gid")}
 STANDARD_SECTIONS = [
     "INBOX", "BACKLOG", "TODO", "WIP", "READY FOR REVIEW",
     "READY FOR TESTING", "READY FOR RELEASE", "DONE",
@@ -509,16 +553,50 @@ STANDARD_SECTIONS = [
 LIGHT_VALIDATION_SECTIONS = {"INBOX"}
 # Days before an unmoved INBOX item is flagged as stale.
 INBOX_STALE_DAYS = 30
-P2_OPTION = "1214202045134886"
-STORY_OPTION = "1214202179972379"
-DISCUSSION_OPTION = "1214202179972383"
-EPIC_OPTION = "1214202179972378"
-SPRINT_FIELD_GID = "1205043346485340"  # workspace-level multi_enum
-SP_FIELD_GID = "1208941031000919"
-PRIORITY_FIELD_GID = "1214202045134883"
-TYPE_FIELD_GID = "1214202179972377"
-THEME_FIELD_GID = "1215430560993891"    # text — per-project theme (free string)
-FEATURE_FIELD_GID = "1215357133051817"  # text — epic/feature this task supports
+# Field and enum-option GIDs are workspace-specific: these are looked up by name
+# in ~/.devhawk/pm/workspace.json rather than baked in. `""` when unconfigured,
+# which callers treat as "this field isn't set up" and skip.
+def _wsg(*path, default=""):
+    """Fetch a nested workspace-config value, e.g. _wsg('options', 'P2')."""
+    node = _workspace_config()
+    for key in path:
+        if not isinstance(node, dict):
+            return default
+        node = node.get(key)
+    return node if isinstance(node, str) and node else default
+
+
+def field_gid(name: str) -> str:
+    """GID of a required custom field, by canonical role name.
+
+    Matches exactly, then on a trailing word, so a workspace that prefixes its
+    fields ("Fraction Priority") resolves the same as one that doesn't
+    ("Priority"). Returns "" when unconfigured — callers skip that field rather
+    than PUTting a GID from someone else's workspace.
+    """
+    want = name.strip().lower()
+    fields = required_fields()
+    for gid, n in fields.items():
+        if n.strip().lower() == want:
+            return gid
+    for gid, n in fields.items():
+        if n.strip().lower().endswith(" " + want):
+            return gid
+    return ""
+
+
+# Resolved once at import from workspace.json. Empty string when unconfigured;
+# every call site already treats "no gid" as "this field isn't set up" and skips.
+P2_OPTION = _wsg("options", "priorityP2")
+STORY_OPTION = _wsg("options", "typeStory")
+DISCUSSION_OPTION = _wsg("options", "typeDiscussion")
+EPIC_OPTION = _wsg("options", "typeEpic")
+SPRINT_FIELD_GID = field_gid("Sprint")
+SP_FIELD_GID = field_gid("Story Points")
+PRIORITY_FIELD_GID = field_gid("Priority")
+TYPE_FIELD_GID = field_gid("Task Type")
+THEME_FIELD_GID = field_gid("Theme")
+FEATURE_FIELD_GID = field_gid("Feature")
 
 
 def auto_estimate(project_gid):
@@ -597,7 +675,13 @@ def hygiene_audit(project_gid, dry_run=False):
     resp = api("GET", f"/projects/{project_gid}/members", params={"opt_fields": "name"})
     if resp:
         member_gids = {m["gid"] for m in resp.get("data", [])}
-        for gid, name in REQUIRED_ADMINS.items():
+        admins = required_admins_map()
+        if not admins:
+            # No configured list: report the count rather than asserting somebody
+            # else's team, and never add members we cannot name.
+            print(f"   ⚠ {len(member_gids)} member(s); no requiredAdmins configured"
+                  f" in {WORKSPACE_CONFIG} — skipping the admin policy")
+        for gid, name in admins.items():
             if gid in member_gids:
                 print(f"   ✅ {name}")
             else:
@@ -614,7 +698,10 @@ def hygiene_audit(project_gid, dry_run=False):
     if resp and isinstance(resp.get("data"), dict):
         for cfs in resp["data"].get("custom_field_settings", []):
             attached.add(cfs.get("custom_field", {}).get("gid", ""))
-    for gid, name in REQUIRED_FIELDS.items():
+    fields = required_fields()
+    if not fields:
+        print("   ⚠ no requiredFields in ~/.devhawk/pm/workspace.json — skipping field policy")
+    for gid, name in fields.items():
         if gid in attached:
             print(f"   ✅ {name}")
         else:
@@ -903,7 +990,7 @@ def create_new_phase(project_gid, phase_name, dry_run=False):
     if fr and isinstance(fr.get("data"), dict):
         for cfs in fr["data"].get("custom_field_settings", []):
             attached.add(cfs.get("custom_field", {}).get("gid", ""))
-    for gid, name in REQUIRED_FIELDS.items():
+    for gid, name in required_fields().items():
         if gid not in attached:
             print(f"    Attaching field: {name}")
             api("POST", f"/projects/{project_gid}/addCustomFieldSetting",
@@ -935,29 +1022,6 @@ def create_new_phase(project_gid, phase_name, dry_run=False):
     if release_opt_gid:
         print(f"  Release option GID: {release_opt_gid} — set on new tasks")
     print(f"\n  Next: create top-level tasks via MCP or asana_ops.py (carry Feature/Theme)")
-
-
-# ═══════════════════════════════════════════════════════
-# Track A — Archive dead/test projects
-# ═══════════════════════════════════════════════════════
-
-ARCHIVE_CONFIRMED = [
-    ("Fraction - Portal", "1206623088461710"),
-    ("MASTER TEST BOARD DevHawk", "1211276876230056"),
-    ("Jeff DevHawk Demo", "1211972929444363"),
-    ("Zahra DevHawk Demo", "1211982990827115"),
-    ("Ralph DevHawk Demo", "1211982994767467"),
-    ("Austin LOCAL TEST BOARD 2", "1211994870269362"),
-    ("PG LOCAL BOARD 6", "1212058118049327"),
-    ("Duplicate of Austin LOCAL TEST BOARD 3", "1212542434688427"),
-    ("oilygears: My Test Project", "1210773240343338"),
-]
-
-ARCHIVE_BORDERLINE = [
-    ("oilygears: My Big Startup MVP", "1210775136581806", "1 task; might be active demo"),
-    ("Dev Wrangler Test Project", "1210986197362617", "100 tasks, 0 completed, all overdue"),
-    ("e-claim: ClickClaims", "1210916454584965", "390 tasks, 0 completed, untouched since Oct 2025"),
-]
 
 
 def add_subtasks_to_project(parent_gid, dry_run=False):
@@ -1081,146 +1145,11 @@ def elevate_subtasks(project_gid, dry_run=False):
     print(f"\n  Elevated {elevated} subtask(s). Parent EPIC cards kept (Feature = own name).")
 
 
-def track_a(dry_run=False, borderline_approved=None):
-    print("\n═══ Track A: Archive dead/test projects ═══\n")
-    archived = 0
-
-    for name, gid in ARCHIVE_CONFIRMED:
-        print(f"  Archiving: {name} ({gid})")
-        resp = api("PUT", f"/projects/{gid}", {"archived": True}, dry_run=dry_run)
-        if resp:
-            archived += 1
-
-    if borderline_approved:
-        for name, gid, _ in ARCHIVE_BORDERLINE:
-            if gid in borderline_approved:
-                print(f"  Archiving (borderline, approved): {name} ({gid})")
-                resp = api("PUT", f"/projects/{gid}", {"archived": True}, dry_run=dry_run)
-                if resp:
-                    archived += 1
-            else:
-                print(f"  Skipping (not approved): {name}")
-    else:
-        for name, gid, concern in ARCHIVE_BORDERLINE:
-            print(f"  ⚠ Borderline: {name} — {concern}")
-
-    print(f"\n  Total: {archived} archived")
-    return archived
+# Default owner for generated index projects, from workspace.json.
+JEREMY_GID = _wsg("defaultProjectOwnerGid")
 
 
-# ═══════════════════════════════════════════════════════
-# Track B — Create portfolios
-# ═══════════════════════════════════════════════════════
-
-CLIENT_PROJECTS = [
-    ("PronovosSample", "1213919587797344"),
-    ("Paryani Construction", "1214053869901394"),
-    ("DeSpir Logistics", "1213743150606707"),
-    ("ART - OpenbooQ", "1212346777720881"),
-    ("ZyraTalk", "1207620940997924"),
-    ("Sully.ai July 2025", "1210833319085956"),
-    ("Best of LLC", "1210277198835217"),
-    ("Belfry", "1207126324035067"),
-    ("Tekmir", "1206272502413754"),
-    ("Tauxbe", "1206754197860593"),
-    ("SignatureFD", "1208741495486540"),
-    ("RevelMG Project", "1212048192376279"),
-    ("ELEVAT3 Phase 2", "1214059647960513"),
-    ("Lucosky Brookman", "1212048413885035"),
-]
-
-INTERNAL_PROJECTS = [
-    ("Fraction - DevHawk", "1211037415421037"),
-    ("Internal PM", "1209000870646737"),
-    ("Internal Architects", "1209426632996311"),
-    ("Alyssia Backlog", "1210990145302970"),
-    ("2026 Fraction + DH Marketing", "1211008924995548"),
-    ("Content Calendar", "1207974249460835"),
-]
-
-JEREMY_GID = "1206452951803612"
-
-
-def create_index_project(ws_gid, name, color, projects, dry_run=False):
-    """Fallback: create a meta-project that lists links to other projects (free on all plans)."""
-    print(f"  Creating index project: {name}")
-    notes_lines = [f"Index of projects in this group:\n"]
-    for proj_name, proj_gid in projects:
-        notes_lines.append(f"• {proj_name} — https://app.asana.com/0/{proj_gid}")
-
-    resp = api("POST", "/projects", {
-        "name": f"📋 {name}",
-        "workspace": ws_gid,
-        "notes": "\n".join(notes_lines),
-        "color": color,
-        "owner": JEREMY_GID,
-    }, dry_run=dry_run)
-
-    gid = resp["data"]["gid"] if resp else "dry-run"
-    return gid
-
-
-def track_b(ws_gid, dry_run=False):
-    print("\n═══ Track B: Create portfolios (or index projects) ═══\n")
-    results = {}
-
-    # Try portfolio creation first. If it fails (402/403 = plan doesn't support),
-    # fall back to index projects (free on all plans).
-    use_portfolios = True
-
-    # Probe: try creating the first portfolio
-    test_resp = api("POST", "/portfolios", {
-        "name": "Active Client Engagements", "workspace": ws_gid,
-        "color": "dark-blue", "owner": JEREMY_GID,
-    }, dry_run=dry_run)
-
-    if not test_resp and not dry_run:
-        print("  ⚠ Portfolio creation failed — plan may not support portfolios.")
-        print("  Falling back to index projects (free on all plans).\n")
-        use_portfolios = False
-
-    if use_portfolios:
-        # First portfolio already created by the probe
-        pgid = test_resp["data"]["gid"] if test_resp else "dry-run"
-        results["Active Client Engagements"] = pgid
-        for proj_name, proj_gid in CLIENT_PROJECTS:
-            print(f"    Adding: {proj_name}")
-            api("POST", f"/portfolios/{pgid}/addItem", {"item": proj_gid}, dry_run=dry_run)
-
-        # Second portfolio
-        print(f"  Creating portfolio: Fraction Internal")
-        resp = api("POST", "/portfolios", {
-            "name": "Fraction Internal", "workspace": ws_gid,
-            "color": "dark-green", "owner": JEREMY_GID,
-        }, dry_run=dry_run)
-        pgid = resp["data"]["gid"] if resp else "dry-run"
-        results["Fraction Internal"] = pgid
-        for proj_name, proj_gid in INTERNAL_PROJECTS:
-            print(f"    Adding: {proj_name}")
-            api("POST", f"/portfolios/{pgid}/addItem", {"item": proj_gid}, dry_run=dry_run)
-
-        results["_type"] = "portfolios"
-    else:
-        # Fallback: index projects
-        results["Active Client Engagements"] = create_index_project(
-            ws_gid, "Active Client Engagements", "dark-blue", CLIENT_PROJECTS, dry_run)
-        results["Fraction Internal"] = create_index_project(
-            ws_gid, "Fraction Internal", "dark-green", INTERNAL_PROJECTS, dry_run)
-        results["_type"] = "index_projects"
-
-    return results
-
-
-# ═══════════════════════════════════════════════════════
-# Track C — Standardize custom fields
-# ═══════════════════════════════════════════════════════
-
-EXISTING_FIELDS = {
-    "Story Points": "1208941031000919",
-    "Release": "1214267151463854",
-    "Task Progress": "1204575864766299",
-}
-RELEASE_FIELD_GID = "1214267151463854"
+RELEASE_FIELD_GID = field_gid("Release")
 
 # Audit tag: stamped on every card created by the `add-card` skill so
 # skill-created vs manually-created cards are distinguishable in saved
@@ -1259,324 +1188,11 @@ def ensure_audit_tag(dry_run=False):
     tag_gid = resp["data"]["gid"]
     print(tag_gid)
     return tag_gid
-RELEASE_OPTIONS = {
-    "Phase 1": "1214267151463855",
-    "Phase 2": "1214267151463856",
-    "Phase 3": "1214267151463857",
-    "Phase 4": "1214267151463858",
-}
-
-
-def track_c(ws_gid, dry_run=False):
-    print("\n═══ Track C: Standardize custom fields ═══\n")
-    new_fields = {}
-
-    print("  Creating field: Fraction Priority")
-    resp = api("POST", "/custom_fields", {
-        "workspace": ws_gid, "name": "Fraction Priority",
-        "resource_subtype": "enum",
-        "enum_options": [
-            {"name": "P0 — Critical", "color": "red"},
-            {"name": "P1 — High", "color": "orange"},
-            {"name": "P2 — Medium", "color": "yellow"},
-            {"name": "P3 — Low", "color": "cool-gray"},
-        ],
-    }, dry_run=dry_run)
-    priority_gid = resp["data"]["gid"] if resp else "dry-run"
-    new_fields["Fraction Priority"] = priority_gid
-    priority_options = {}
-    if resp and isinstance(resp.get("data"), dict) and resp["data"].get("enum_options"):
-        for opt in resp["data"]["enum_options"]:
-            priority_options[opt["name"]] = opt["gid"]
-    new_fields["priority_options"] = priority_options
-
-    print("  Creating field: Fraction Task Type")
-    resp = api("POST", "/custom_fields", {
-        "workspace": ws_gid, "name": "Fraction Task Type",
-        "resource_subtype": "enum",
-        "enum_options": [
-            {"name": "EPIC", "color": "purple"},
-            {"name": "Story", "color": "blue"},
-            {"name": "Bug", "color": "red"},
-            {"name": "Chore", "color": "cool-gray"},
-            {"name": "Tech Debt", "color": "orange"},
-            {"name": "Discussion", "color": "aqua"},
-            {"name": "Milestone", "color": "green"},
-            {"name": "Spike", "color": "yellow"},
-        ],
-    }, dry_run=dry_run)
-    type_gid = resp["data"]["gid"] if resp else "dry-run"
-    new_fields["Fraction Task Type"] = type_gid
-    type_options = {}
-    if resp and isinstance(resp.get("data"), dict) and resp["data"].get("enum_options"):
-        for opt in resp["data"]["enum_options"]:
-            type_options[opt["name"]] = opt["gid"]
-    new_fields["type_options"] = type_options
-
-    all_fields = {
-        "Fraction Priority": priority_gid,
-        "Fraction Task Type": type_gid,
-        **EXISTING_FIELDS,
-    }
-
-    for proj_name, proj_gid in CLIENT_PROJECTS:
-        existing = set()
-        resp = api("GET", f"/projects/{proj_gid}",
-                   params={"opt_fields": "custom_field_settings.custom_field.gid"})
-        if resp and isinstance(resp.get("data"), dict):
-            for cfs in resp["data"].get("custom_field_settings", []):
-                existing.add(cfs.get("custom_field", {}).get("gid", ""))
-
-        for fname, fgid in all_fields.items():
-            if fgid in existing:
-                print(f"    {proj_name}: {fname} already attached")
-                continue
-            print(f"    {proj_name}: attaching {fname}")
-            api("POST", f"/projects/{proj_gid}/addCustomFieldSetting",
-                {"custom_field": fgid, "is_important": True}, dry_run=dry_run)
-
-    return new_fields
-
-
-# ═══════════════════════════════════════════════════════
-# Track D — Fix Paryani Construction
-# ═══════════════════════════════════════════════════════
-
-PARYANI_GID = "1214053869901394"
-PARYANI_SECTIONS = {
-    "PM Onboarding Tasks": "1214053869948957",
-    "TODO": "1214053869948965",
-    "WIP": "1214053869948967",
-    "READY FOR REVIEW": "1214053869949005",
-    "READY FOR TESTING": "1214053869948969",
-    "READY FOR RELEASE": "1214136370216994",
-    "DONE": "1214053869948971",
-}
-
-USER_MAP = {
-    "austin": "1208216523594274",
-    "austin brock": "1208216523594274",
-    "jeremy": "1206452951803612",
-    "jeremy king": "1206452951803612",
-    "andrew": "1210024510759633",
-    "andrew c halliburton": "1210024510759633",
-    "andrew halliburton": "1210024510759633",
-}
-
-
-def track_d(new_fields=None, dry_run=False):
-    print("\n═══ Track D: Fix Paryani Construction ═══\n")
-    stats = {"sections_placed": 0, "owners_reassigned": 0, "fields_set": 0, "skipped": []}
-
-    print("  D.1: Setting project metadata...")
-    api("PUT", f"/projects/{PARYANI_GID}", {
-        "start_on": "2026-04-14", "due_on": "2026-05-15",
-        "html_notes": "<body><strong>Paryani Construction — Subcontract Generation Tool</strong><br><br>Rebuild of a previously-prototyped contracts tool. Delivers an 8-step subcontract wizard with AI-assisted quote extraction, gold-standard scope library, BoldSign e-signature, and Acumatica commitment write-back.<br><br><strong>Stack:</strong> Next.js 16, Drizzle, PG 16, Better Auth, BullMQ, DO App Platform.<br><br><strong>Repo:</strong> https://github.com/ParyaniConstructionTechnology/ContractsTool<br><br><strong>Team:</strong> Andrew Halliburton (PM), Austin Brock (eng), Jeremy King (architect).<br><br><strong>MVP target:</strong> 2026-05-15.</body>",
-    }, dry_run=dry_run)
-
-    print("  D.2: Posting status update...")
-    api("POST", f"/projects/{PARYANI_GID}/project_statuses", {
-        "color": "yellow",
-        "title": "Discovery complete, backlog structured, execution starting",
-        "text": "Week 1 closed with full EPIC-and-Story backlog. PR #1 shipped Tier 0 security hardening. 22 meta/planning tasks closed. Yellow: (a) only 1 feature task shipped in week 1, (b) MVP target May 15 requires sustained velocity, (c) e-sign vendor decision still needs validation.",
-    }, dry_run=dry_run)
-
-    print("  Fetching all Paryani tasks...")
-    tasks = paginate(f"/projects/{PARYANI_GID}/tasks",
-                     opt_fields="name,completed,assignee.gid,assignee.name,notes,memberships.section.gid,custom_fields.gid,custom_fields.number_value,custom_fields.enum_value.gid")
-    print(f"  Found {len(tasks)} tasks")
-
-    # D.3 — Section placement
-    print("  D.3: Placing orphaned tasks...")
-    for task in tasks:
-        has_section = any(m.get("section", {}).get("gid") for m in task.get("memberships", []))
-        if has_section:
-            continue
-        section = PARYANI_SECTIONS["DONE"] if task.get("completed") else PARYANI_SECTIONS["TODO"]
-        print(f"    → {task.get('name', '')[:50]} → {'DONE' if task.get('completed') else 'TODO'}")
-        api("POST", f"/sections/{section}/addTask", {"task": task["gid"]}, dry_run=dry_run)
-        stats["sections_placed"] += 1
-
-    # D.4 — Owner reassignment
-    print("  D.4: Reassigning owners...")
-    owner_pattern = re.compile(r"Owner \(suggested\):\s*(.+)", re.IGNORECASE)
-    for task in tasks:
-        match = owner_pattern.search(task.get("notes", ""))
-        if not match:
-            continue
-        first_name = re.split(r"\s*\+\s*", match.group(1).strip())[0]
-        first_name = re.sub(r"\s*\(.*\)", "", first_name).strip().lower()
-        target_gid = USER_MAP.get(first_name)
-        if not target_gid:
-            stats["skipped"].append(f"{task['name'][:40]}: unknown '{match.group(1).strip()}'")
-            continue
-        current = task.get("assignee") or {}
-        if current.get("gid") == target_gid:
-            continue
-        print(f"    {task['name'][:50]} → {first_name}")
-        api("PUT", f"/tasks/{task['gid']}", {"assignee": target_gid}, dry_run=dry_run)
-        stats["owners_reassigned"] += 1
-
-    # D.5 — Attach custom fields
-    print("  D.5: Attaching custom fields...")
-    all_fields = {}
-    if new_fields:
-        all_fields["Fraction Priority"] = new_fields.get("Fraction Priority", "")
-        all_fields["Fraction Task Type"] = new_fields.get("Fraction Task Type", "")
-    all_fields.update(EXISTING_FIELDS)
-
-    existing = set()
-    resp = api("GET", f"/projects/{PARYANI_GID}",
-               params={"opt_fields": "custom_field_settings.custom_field.gid"})
-    if resp and isinstance(resp.get("data"), dict):
-        for cfs in resp["data"].get("custom_field_settings", []):
-            existing.add(cfs.get("custom_field", {}).get("gid", ""))
-
-    for fname, fgid in all_fields.items():
-        if not fgid or fgid == "dry-run":
-            continue
-        if fgid in existing:
-            print(f"    {fname}: already attached")
-            continue
-        print(f"    Attaching: {fname}")
-        api("POST", f"/projects/{PARYANI_GID}/addCustomFieldSetting",
-            {"custom_field": fgid, "is_important": True}, dry_run=dry_run)
-
-    # D.6 — Populate field values
-    print("  D.6: Populating field values...")
-    priority_pattern = re.compile(r"Priority:\s*P(\d)", re.IGNORECASE)
-    sp_pattern = re.compile(r"(?:Story Points|Total Story Points):\s*(\d+)", re.IGNORECASE)
-    priority_options = (new_fields or {}).get("priority_options", {})
-    type_options = (new_fields or {}).get("type_options", {})
-    priority_map = {str(i): priority_options.get(f"P{i} — {['Critical','High','Medium','Low'][i]}", "")
-                    for i in range(4)}
-
-    for task in tasks:
-        name = task.get("name", "")
-        notes = task.get("notes", "")
-        updates = {}
-
-        pm = priority_pattern.search(notes)
-        if pm and new_fields and new_fields.get("Fraction Priority"):
-            opt_gid = priority_map.get(pm.group(1))
-            if opt_gid:
-                updates[new_fields["Fraction Priority"]] = opt_gid
-
-        if new_fields and new_fields.get("Fraction Task Type"):
-            if re.match(r"^(EPIC:|Epic:|\[E\d)", name):
-                opt = type_options.get("EPIC", "")
-                if opt:
-                    updates[new_fields["Fraction Task Type"]] = opt
-            elif re.search(r"\bBUG\b", name, re.IGNORECASE):
-                opt = type_options.get("Bug", "")
-                if opt:
-                    updates[new_fields["Fraction Task Type"]] = opt
-            elif re.search(r"\bDISCUSS\b", name, re.IGNORECASE):
-                opt = type_options.get("Discussion", "")
-                if opt:
-                    updates[new_fields["Fraction Task Type"]] = opt
-
-        spm = sp_pattern.search(notes)
-        if spm:
-            updates[EXISTING_FIELDS["Story Points"]] = int(spm.group(1))
-
-        if updates:
-            print(f"    {name[:50]}: {len(updates)} fields")
-            api("PUT", f"/tasks/{task['gid']}", {"custom_fields": updates}, dry_run=dry_run)
-            stats["fields_set"] += 1
-
-    print(f"\n  Sections: {stats['sections_placed']} | Owners: {stats['owners_reassigned']} | Fields: {stats['fields_set']}")
-    if stats["skipped"]:
-        print(f"  Skipped ({len(stats['skipped'])}):")
-        for s in stats["skipped"]:
-            print(f"    · {s}")
-    return stats
-
-
-# ═══════════════════════════════════════════════════════
-# Track E — Clean PronovosSample
-# ═══════════════════════════════════════════════════════
-
-PRONOVOS_GID = "1213919587797344"
-
-
-def track_e(new_fields=None, dry_run=False):
-    print("\n═══ Track E: Clean PronovosSample ═══\n")
-    sp_prefix = re.compile(r"^\[SP:\s*(\d+)\]\s*")
-    tasks = paginate(f"/projects/{PRONOVOS_GID}/tasks", opt_fields="name")
-    cleaned = 0
-
-    for task in tasks:
-        m = sp_prefix.match(task.get("name", ""))
-        if not m:
-            continue
-        points = int(m.group(1))
-        new_name = sp_prefix.sub("", task["name"]).strip()
-        updates = {"name": new_name, "custom_fields": {EXISTING_FIELDS["Story Points"]: points}}
-        print(f"    {task['name'][:60]} → {new_name[:40]} (SP={points})")
-        api("PUT", f"/tasks/{task['gid']}", updates, dry_run=dry_run)
-        cleaned += 1
-
-    print(f"\n  Cleaned: {cleaned} tasks")
-    return cleaned
 
 
 # ═══════════════════════════════════════════════════════
 # Report
 # ═══════════════════════════════════════════════════════
-
-def write_report(results):
-    elapsed = time.time() - (START_TIME or time.time())
-    lines = [
-        "# Asana Cleanup Report",
-        f"\n**Date:** {datetime.now().strftime('%Y-%m-%d %H:%M')}",
-        f"**API calls:** {CALLS} | **Errors:** {ERRORS} | **Elapsed:** {elapsed:.0f}s\n",
-    ]
-
-    if "track_a" in results:
-        lines.append(f"## Track A: Archived {results['track_a']} projects\n")
-
-    if "track_b" in results:
-        btype = results["track_b"].get("_type", "portfolios")
-        lines.append(f"## Track B: {'Portfolios' if btype == 'portfolios' else 'Index Projects (portfolio fallback)'}")
-        for name, gid in results["track_b"].items():
-            if name.startswith("_"):
-                continue
-            lines.append(f"- **{name}**: `{gid}` — https://app.asana.com/0/{gid}")
-
-    if "track_c" in results:
-        nf = results["track_c"]
-        lines.append("## Track C: Custom fields")
-        lines.append(f"- **Fraction Priority**: `{nf.get('Fraction Priority', 'n/a')}`")
-        lines.append(f"- **Fraction Task Type**: `{nf.get('Fraction Task Type', 'n/a')}`")
-        if nf.get("priority_options"):
-            for n, g in nf["priority_options"].items():
-                lines.append(f"  - {n}: `{g}`")
-        if nf.get("type_options"):
-            for n, g in nf["type_options"].items():
-                lines.append(f"  - {n}: `{g}`")
-        lines.append("")
-
-    if "track_d" in results:
-        d = results["track_d"]
-        lines.append("## Track D: Paryani Construction")
-        lines.append(f"- Sections placed: {d.get('sections_placed', 0)}")
-        lines.append(f"- Owners reassigned: {d.get('owners_reassigned', 0)}")
-        lines.append(f"- Fields populated: {d.get('fields_set', 0)}")
-        if d.get("skipped"):
-            for s in d["skipped"]:
-                lines.append(f"  - ⚠ {s}")
-        lines.append("")
-
-    if "track_e" in results:
-        lines.append(f"## Track E: PronovosSample — {results['track_e']} tasks cleaned\n")
-
-    report = "\n".join(lines)
-    REPORT_FILE.parent.mkdir(parents=True, exist_ok=True)
-    REPORT_FILE.write_text(report)
-    print(f"\n{'='*60}")
-    print(report)
-    print(f"Report: {REPORT_FILE}")
 
 
 # ═══════════════════════════════════════════════════════
@@ -1599,6 +1215,12 @@ def _read_json_arg(arg):
         sys.exit(1)
 
 
+# Release enum options, {phase name: option gid}, seeded from workspace.json.
+# create_new_phase() adds to this dict for the rest of the process; --add-release-option
+# creates the option in Asana and PRINTS the new gid, but does not persist it — add it
+# to workspace.json yourself if you want it resolved on later runs. The gids are
+# workspace-specific, so they are never shipped.
+RELEASE_OPTIONS = dict(_workspace_config().get("releaseOptions", {}))
 def _resolve_section_gid(project_gid, section):
     """Section name (case-insensitive) or numeric gid → section gid.
     Raises ValueError when a named section isn't found in the project."""
@@ -1747,9 +1369,7 @@ def main():
     parser.add_argument("--set-workspace", metavar="WORKSPACE_GID", help="Persist the active workspace choice (for multi-workspace accounts). Both the CLI and the MCP server reuse it.")
     parser.add_argument("--pick-workspace", action="store_true", help="Interactively pick the active workspace once and save it.")
     parser.add_argument("--list-projects", action="store_true", help="List non-archived projects in the active workspace (gid<TAB>name). Lets Claude show projects by name so the user picks one to fence the MCP to — no hunting GIDs from URLs.")
-    parser.add_argument("--track", choices=["A", "B", "C", "D", "E", "all"])
     parser.add_argument("--dry-run", action="store_true")
-    parser.add_argument("--borderline", nargs="*", help="GIDs of borderline projects (Track A)")
     args = parser.parse_args()
 
     if args.auth:
@@ -1881,40 +1501,8 @@ def main():
         auto_estimate(args.estimate)
         return
 
-    if not args.track:
-        parser.print_help()
-        return
-
-    # Verify auth works
-    me = api("GET", "/users/me", params={"opt_fields": "name,workspaces.gid"})
-    if not me:
-        print("Auth failed. Run --auth or set ASANA_PAT.")
-        sys.exit(1)
-    ws_gid = resolve_workspace()  # multi-workspace accounts pick once
-    print(f"User: {me['data']['name']} | Workspace: {ws_gid}")
-    print(f"Mode: {'DRY RUN' if args.dry_run else 'LIVE'}\n")
-
-    results = {}
-    tracks = ["A", "B", "C", "D"] if args.track == "all" else [args.track]
-
-    if "A" in tracks:
-        results["track_a"] = track_a(args.dry_run, set(args.borderline or []))
-
-    new_fields = None
-    if "C" in tracks:
-        new_fields = track_c(ws_gid, args.dry_run)
-        results["track_c"] = new_fields
-
-    if "B" in tracks:
-        results["track_b"] = track_b(ws_gid, args.dry_run)
-
-    if "D" in tracks:
-        results["track_d"] = track_d(new_fields, args.dry_run)
-
-    if "E" in tracks:
-        results["track_e"] = track_e(new_fields, args.dry_run)
-
-    write_report(results)
+    parser.print_help()
+    return
 
 
 if __name__ == "__main__":

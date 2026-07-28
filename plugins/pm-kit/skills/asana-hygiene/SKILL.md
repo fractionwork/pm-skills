@@ -127,7 +127,7 @@ External-source enrichment (meetings/emails/chat) lands in BACKLOG by default â€
 
 ## Step 5b: Release field population
 
-The Release enum field (`1214267151463854`) tracks which phase/release a task belongs to. Hygiene auto-populates it:
+The **Release** enum field (GID from `requiredFields` in `~/.devhawk/pm/workspace.json`) tracks which phase/release a task belongs to. Hygiene auto-populates it:
 
 1. **From an EPIC definition card's own name:** if an `EPIC`-typed card contains "(Phase N)", set its Release = "Phase N". (There are no parent epics in the flat model â€” the old "child inherits from parent" path is gone; propagate by shared `Feature` instead.)
 2. **From task prefixes:** `[SCRUM-*]` = Phase 1, `[PHAS-*]` = Phase 2 (Jira migration convention)
@@ -143,7 +143,7 @@ python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/asana_ops.py --add-release-option "
 
 ## Step 5c: Sprint field population
 
-The Sprint **multi_enum** field (`1205043346485340`) tracks time-boxed iterations.
+The **Sprint** multi_enum field (GID from `requiredFields` in `~/.devhawk/pm/workspace.json`) tracks time-boxed iterations.
 
 **Naming convention**: `Sprint M/D-M/D` (e.g. `Sprint 4/7-4/14`). Year omitted; dates uniquely identify the sprint.
 

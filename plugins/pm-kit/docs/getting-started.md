@@ -57,8 +57,20 @@ the documented behaviour for "MCP not connected".
 /pm-setup
 ```
 
-This builds a Python environment at `~/.devhawk/pm/`, installs the MCP SDK, and opens a browser
-for Asana OAuth. It is idempotent — re-run it any time to upgrade, or to re-check state.
+This builds a Python environment at `~/.devhawk/pm/`, asks for your Asana OAuth app, and opens a
+browser to log in. Idempotent — re-run any time to upgrade or re-check state.
+
+**The OAuth app.** Get it from <https://app.asana.com/0/my-apps>; the redirect URI must be
+`http://localhost:8372/callback`. The setup stores it at 0600 in `~/.devhawk/pm/workspace.json`
+and reads the secret without echoing it. It is deliberately not shipped with the plugin — a
+hardcoded one would be published to a public marketplace, and would tie the kit to a single Asana
+app.
+
+Supply it up front to skip the prompt:
+
+```
+/pm-setup --client-id <id> --client-secret <secret>
+```
 
 To see what's missing without changing anything:
 
@@ -68,11 +80,11 @@ To see what's missing without changing anything:
 
 **Restart Claude Code again** after the first run.
 
-**Headless machine, or a guest/service account?** Export a personal access token instead and the
-OAuth step is skipped:
+**No app, headless machine, or a guest/service account?** A personal access token skips the app
+prompt and OAuth entirely:
 
 ```bash
-export ASANA_PAT=<token>
+export ASANA_PAT=<token>     # app.asana.com → My settings → Apps
 ```
 
 Credentials are written to `~/.devhawk/pm/` at mode 0600 — never inside the plugin directory,

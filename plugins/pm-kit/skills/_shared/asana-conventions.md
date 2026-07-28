@@ -4,14 +4,14 @@ Standard structure for Asana projects created by the DevHawk bootstrap skill and
 
 ## Required admins
 
-Every project must have at least 2 Admins to prevent orphaned projects if someone leaves:
+Every project must have **at least 2 Admins**, so a project is never orphaned when someone
+leaves. That is the rule; *who* those admins are is workspace configuration, not part of this
+kit — they live under `requiredAdmins` in `~/.devhawk/pm/workspace.json` (see
+`workspace.example.json` for the shape).
 
-| Name | GID | Email |
-|---|---|---|
-| Jeremy King | `1206452951803612` | jeremy@hirefraction.com |
-| Alyssia Maluda | `1204497823875018` | alyssia@hirefraction.com |
-
-The `asana-hygiene` skill flags projects where either is missing or not in Admin role.
+`asana-hygiene` reads that list and flags any project where a named admin is missing or is not
+in the Admin role. With no list configured it reports the count only, rather than asserting
+somebody else's team.
 
 ## Standard custom fields (8)
 

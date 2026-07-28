@@ -1,0 +1,46 @@
+{
+  "_comment": "Copy to ~/.devhawk/pm/workspace.json and fill in for YOUR Asana workspace. Everything here is workspace-specific: custom-field GIDs differ per workspace, the admin list is your team, and the OAuth app is yours. None of it is shipped with the plugin \u2014 it used to be, which both leaked our values into a public marketplace and made the kit unusable against any other workspace.",
+  "_requiredFields": "GID -> display name for the custom fields every project must carry. Find them by reading one existing task's custom_fields, or the project's custom_field_settings, via the Asana API. Omit the block entirely and the field policy is skipped (hygiene reports that rather than attaching the wrong GIDs).",
+  "requiredFields": {
+    "0000000000000001": "Priority",
+    "0000000000000002": "Task Type",
+    "0000000000000003": "Story Points",
+    "0000000000000004": "Task Progress",
+    "0000000000000005": "Release",
+    "0000000000000006": "Sprint",
+    "0000000000000007": "Theme",
+    "0000000000000008": "Feature"
+  },
+  "_requiredAdmins": "Who must hold Admin on every project \u2014 at least two, so a project is never orphaned when someone leaves. asana-hygiene flags projects missing any of them. Find GIDs with: python3 asana_ops.py --find-user \"<name or email>\".",
+  "requiredAdmins": [
+    {
+      "name": "First Admin",
+      "gid": "0000000000000010",
+      "email": "first@example.com"
+    },
+    {
+      "name": "Second Admin",
+      "gid": "0000000000000011",
+      "email": "second@example.com"
+    }
+  ],
+  "_oauth": "Only needed for the OAuth login flow. The PAT path (export ASANA_PAT=...) needs none of this. Register an app at https://app.asana.com/0/my-apps with redirect http://localhost:8372/callback. ASANA_CLIENT_ID / ASANA_CLIENT_SECRET in the environment take precedence over these.",
+  "oauth": {
+    "clientId": "",
+    "clientSecret": ""
+  },
+  "_options": "Enum-option GIDs the hygiene auto-fill writes. Find them with: python3 asana_ops.py --hygiene <PROJECT_GID> --dry-run, or via the Asana API on each field.",
+  "options": {
+    "priorityP2": "",
+    "typeStory": "",
+    "typeDiscussion": "",
+    "typeEpic": ""
+  },
+  "_releaseOptions": "Release enum options, {phase name: option gid}. Extended automatically as new phases are created with --add-release-option.",
+  "releaseOptions": {
+    "Phase 1": "",
+    "Phase 2": ""
+  },
+  "_defaultProjectOwnerGid": "Owner assigned to index/portfolio projects this kit creates. Optional.",
+  "defaultProjectOwnerGid": ""
+}

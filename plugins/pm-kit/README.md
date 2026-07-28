@@ -112,7 +112,18 @@ string until it's bumped — updates would silently not reach users.)
 
 Re-run `/pm-setup` after an update if the dependencies changed; it's idempotent.
 
-**Migrating from the `curl | bash` installer?** Your existing credential at
-`~/.claude/scripts/.asana-token.json` is still read, so you won't be logged out. Remove the old
-user-scope MCP registration (`claude mcp remove asana`) so it doesn't collide with the
-plugin-provided one.
+**Migrating from the `curl | bash` installer?** Run the cleanup script this kit ships — it removes
+the installer's 24 skills, its agent, its Python runtime, the stale `SessionStart` hook and the
+block it spliced into `~/.claude/CLAUDE.md`, backing everything up first:
+
+```bash
+skills/_shared/migrate-from-installer.sh            # dry run
+skills/_shared/migrate-from-installer.sh --apply
+```
+
+It removes **by name**, so it can't take out skills the installer never put there, and it keeps
+`.asana-token.json` — you stay logged in. Full walkthrough in
+[docs/claude-plugins.md](../../docs/claude-plugins.md#migrating-off-the-old-installer).
+
+You will need to re-authenticate regardless: the Asana OAuth client secret was rotated, so run
+`/pm-setup --reauth` afterwards.

@@ -33,8 +33,19 @@ Python MCP server but cannot build the environment to run it, so that one step s
    ${CLAUDE_SKILL_DIR}/scripts/pm-setup.sh
    ```
 
-   Idempotent — it skips work already done. Flags: `--deps-only` (skip auth, e.g. when a PAT
-   comes from the environment), `--reauth` (replace an existing credential).
+   Idempotent — it skips work already done. Flags: `--deps-only` (skip the app + auth steps),
+   `--reauth` (replace an existing credential), `--client-id` / `--client-secret` (supply the
+   OAuth app without being asked).
+
+   **It will ask for an Asana OAuth app** unless one is already configured or a PAT is set. The
+   app is not shipped with the plugin — hardcoding it once published a client secret to a public
+   marketplace and tied the kit to a single Asana app. Point the user at
+   <https://app.asana.com/0/my-apps>; the redirect URI must be `http://localhost:8372/callback`.
+   The secret is read without echo and stored at 0600 in `~/.devhawk/pm/workspace.json`, merged
+   alongside any `requiredFields` / `requiredAdmins` already there.
+
+   If they have no app and don't want to create one, a personal access token skips OAuth
+   entirely — `export ASANA_PAT=<token>`.
 
 3. **Tell the user to restart Claude Code.** The Asana MCP server is registered by the plugin's
    `.mcp.json` and is only started at session start, so it will not appear in the current session
@@ -47,8 +58,16 @@ Python MCP server but cannot build the environment to run it, so that one step s
 
 - **OAuth (default)** — opens a browser, stores a refreshable token at
   `~/.devhawk/pm/asana-token.json` (0600). Right for a normal user account.
-- **PAT** — `export ASANA_PAT=<token>`; the setup detects it and skips OAuth. Right for guest or
-  service accounts, and for headless machines where no browser can open.
+- **PAT** — `export ASANA_PAT=<token>`; the setup detects it and skips both the app prompt and
+  OAuth. Right for guest or service accounts, and for headless machines where no browser can open.
+
+Scripted / unattended installs pass the app on the command line or in the environment, and never
+prompt:
+
+```bash
+pm-setup.sh --client-id <id> --client-secret <secret>
+ASANA_CLIENT_ID=<id> ASANA_CLIENT_SECRET=<secret> pm-setup.sh
+```
 
 Credentials are written to `~/.devhawk/pm/`, never inside the plugin — the plugin directory is
 content-hash addressed and is replaced on every update, which would silently discard a token
@@ -57,13 +76,19 @@ is still read, so an existing user does not have to re-authenticate.
 
 ### Hard rules
 
-- **Never print, echo, or log the token**, and never include it in an error message, a URL, or a
-  command you show the user. If a command would surface it, redirect that output.
+- **Never print, echo, or log the token or the client secret**, and never include either in an
+  error message, a URL, or a command you show the user. If a command would surface one, redirect
+  that output. Don't read `workspace.json` back to the user to "confirm" it saved — `--check`
+  reports whether an app is configured without revealing it.
 - Don't run this unprompted as a fix for an unrelated failure. If a board skill fails, run
   `--check` first and report what it says — reinstalling a working runtime hides the real error.
 - Don't offer to `pip install --user` or otherwise write outside `~/.devhawk/pm`.
 
 ### Success looks like
 
-`--check` reports `✓` for interpreter, runtime and credential; the user has restarted Claude Code;
-a board skill completes a real call against their workspace.
+`--check` reports `✓` for interpreter, runtime, OAuth app (or "not needed — using a PAT") and
+credential; the user has restarted Claude Code; a board skill completes a real call against their
+workspace.
+
+A `⊙ workspace config: none` is **not** a failure — the board skills work without it and simply
+skip the field/admin policy. Mention it once, point at `workspace.example.json`, and move on.

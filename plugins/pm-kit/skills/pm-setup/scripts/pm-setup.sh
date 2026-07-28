@@ -14,10 +14,16 @@
 # Idempotent: safe to re-run, and re-running is how you upgrade the deps.
 #
 # Usage:
-#   pm-setup.sh              # install deps, then authenticate if needed
-#   pm-setup.sh --check      # report status only, change nothing
-#   pm-setup.sh --deps-only  # install deps, skip the auth step
-#   pm-setup.sh --reauth     # force re-authentication
+#   pm-setup.sh                          # install deps, configure the app, authenticate
+#   pm-setup.sh --check                  # report status only, change nothing
+#   pm-setup.sh --deps-only              # install deps, skip app config + auth
+#   pm-setup.sh --reauth                 # force re-authentication
+#   pm-setup.sh --client-id ID           # supply the OAuth app non-interactively
+#   pm-setup.sh --client-secret SECRET   # (or set ASANA_CLIENT_ID / ASANA_CLIENT_SECRET)
+#
+# The OAuth app is NOT shipped with the plugin — it used to be hardcoded, which
+# published a client secret to a public marketplace and tied the kit to one Asana
+# app. It is collected here instead and stored at 0600 in workspace.json.
 
 set -uo pipefail
 
@@ -31,14 +37,19 @@ SCRIPT_DIR="$(SRC="${BASH_SOURCE[0]}"; while [ -h "$SRC" ]; do D="$(cd -P "$(dir
 SHARED="$(cd -P "$SCRIPT_DIR/../../_shared" && pwd)"
 
 CHECK_ONLY=0; DEPS_ONLY=0; REAUTH=0
-for a in "$@"; do
+CLIENT_ID="${ASANA_CLIENT_ID:-}"; CLIENT_SECRET="${ASANA_CLIENT_SECRET:-}"
+while [ $# -gt 0 ]; do
+  a="$1"
   case "$a" in
+    --client-id) CLIENT_ID="${2:-}"; shift ;;
+    --client-secret) CLIENT_SECRET="${2:-}"; shift ;;
     --check) CHECK_ONLY=1 ;;
     --deps-only) DEPS_ONLY=1 ;;
     --reauth) REAUTH=1 ;;
     -h|--help) awk 'NR==1{next} /^#/{sub(/^# ?/,""); print; next} {exit}' "$0"; exit 0 ;;
     *) echo "pm-setup: unknown option '$a'" >&2; exit 2 ;;
   esac
+  shift
 done
 
 ok()   { printf '  \033[32m✓\033[0m %s\n' "$1"; }
@@ -65,6 +76,52 @@ deps_present() { [ -x "$VENV_PY" ] && "$VENV_PY" -c 'import mcp, requests' >/dev
 # ASANA_TOKEN_FILE (install.sh:523) — not ~/.claude/.
 LEGACY_TOKEN="$HOME/.claude/scripts/.asana-token.json"
 
+WS_CONFIG="$PM_HOME/workspace.json"
+
+# Any python that runs — these helpers are used by --check, which runs BEFORE
+# the venv exists. Pointing at $VENV_PY there makes the probe fail silently and
+# report a configured app as missing.
+cfg_py() {
+  if [ -x "$VENV_PY" ]; then echo "$VENV_PY"
+  elif command -v python3 >/dev/null 2>&1; then echo python3
+  else echo python; fi
+}
+
+# Is an OAuth app available? The flag/env wins, else workspace.json must carry
+# both halves. A PAT makes all of this unnecessary.
+oauth_app_configured() {
+  [ -n "$CLIENT_ID" ] && [ -n "$CLIENT_SECRET" ] && return 0
+  [ -f "$WS_CONFIG" ] || return 1
+  "$(cfg_py)" -c '
+import json, sys
+try:
+    o = json.load(open(sys.argv[1])).get("oauth") or {}
+except Exception:
+    sys.exit(1)
+sys.exit(0 if o.get("clientId") and o.get("clientSecret") else 1)
+' "$WS_CONFIG" 2>/dev/null
+}
+
+# Merge the app into workspace.json WITHOUT disturbing the other blocks
+# (requiredFields, requiredAdmins, ...) a user may already have configured.
+save_oauth_app() {
+  "$(cfg_py)" -c '
+import json, os, pathlib, sys
+path, cid, secret = sys.argv[1], sys.argv[2], sys.argv[3]
+p = pathlib.Path(path)
+try:
+    cfg = json.loads(p.read_text())
+except Exception:
+    cfg = {}
+cfg.setdefault("oauth", {})
+cfg["oauth"]["clientId"] = cid
+cfg["oauth"]["clientSecret"] = secret
+p.parent.mkdir(parents=True, exist_ok=True)
+p.write_text(json.dumps(cfg, indent=2) + "\n")
+os.chmod(p, 0o600)
+' "$WS_CONFIG" "$1" "$2"
+}
+
 authed() {
   [ -f "$PM_HOME/asana-token.json" ] || [ -f "$LEGACY_TOKEN" ] \
     || [ -n "${ASANA_PAT:-}" ] || [ -n "${ASANA_ACCESS_TOKEN:-}" ]
@@ -78,8 +135,15 @@ if [ "$CHECK_ONLY" = 1 ]; then
   else bad "no python >= 3.10 on PATH"; fi
   if deps_present; then ok "runtime: venv ready (mcp, requests)"
   else warn "runtime: not installed — run /pm-setup"; fi
+  if oauth_app_configured; then ok "oauth app: configured"
+  elif [ -n "${ASANA_PAT:-}${ASANA_ACCESS_TOKEN:-}" ]; then ok "oauth app: not needed (using a PAT)"
+  else warn "oauth app: not configured — /pm-setup will ask, or use ASANA_PAT"; fi
   if authed; then ok "asana: credential present"
   else warn "asana: not authenticated — run /pm-setup"; fi
+  # A missing workspace.json is NOT an error: the board skills still work, they
+  # just skip the field/admin policy rather than writing another workspace's GIDs.
+  if [ -f "$WS_CONFIG" ]; then ok "workspace config: $WS_CONFIG"
+  else warn "workspace config: none — field/admin policy skipped (see workspace.example.json)"; fi
   exit 0
 fi
 
@@ -126,10 +190,37 @@ else
   if [ -n "${ASANA_PAT:-}${ASANA_ACCESS_TOKEN:-}" ]; then
     ok "using the PAT from the environment"
   else
+    # Collect the OAuth app before starting the flow. It is deliberately not
+    # shipped: hardcoding it published a client secret to a public marketplace
+    # and tied the kit to a single Asana app.
+    if ! oauth_app_configured; then
+      if [ -t 0 ]; then
+        echo
+        echo "  Asana OAuth app — from https://app.asana.com/0/my-apps"
+        echo "  (redirect URI must be http://localhost:8372/callback)"
+        echo
+        echo "  No app? Press Enter twice to skip and use a personal access token instead."
+        [ -n "$CLIENT_ID" ] || { printf "    Client ID: "; read -r CLIENT_ID; }
+        # -s so the secret never lands in the terminal or scrollback.
+        [ -n "$CLIENT_SECRET" ] || { printf "    Client secret: "; read -rs CLIENT_SECRET; echo; }
+      fi
+      if [ -z "$CLIENT_ID" ] || [ -z "$CLIENT_SECRET" ]; then
+        bad "no Asana OAuth app configured, and no PAT set."
+        echo "     Either re-run with --client-id/--client-secret," >&2
+        echo "     or use a token instead:  export ASANA_PAT=<token>" >&2
+        echo "     (app.asana.com → My settings → Apps → Personal access tokens)" >&2
+        exit 1
+      fi
+      save_oauth_app "$CLIENT_ID" "$CLIENT_SECRET"
+      ok "oauth app saved to $WS_CONFIG (0600)"
+    fi
+
     echo "  starting Asana OAuth — a browser window will open…"
-    if ! "$VENV_PY" "$SHARED/asana_ops.py" --auth; then
+    if ! ASANA_CLIENT_ID="$CLIENT_ID" ASANA_CLIENT_SECRET="$CLIENT_SECRET" \
+         "$VENV_PY" "$SHARED/asana_ops.py" --auth; then
       bad "authentication failed."
-      echo "     Alternative: export ASANA_PAT=<token> and re-run." >&2
+      echo "     Check the app's redirect URI is http://localhost:8372/callback," >&2
+      echo "     or use a token instead:  export ASANA_PAT=<token>" >&2
       exit 1
     fi
   fi
