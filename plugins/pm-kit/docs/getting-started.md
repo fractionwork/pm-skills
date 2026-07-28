@@ -12,12 +12,33 @@ required; this kit manages boards, not code.
   still ship 3.9 as `python3`; the setup detects that and tells you.
   - macOS: `brew install python@3.12` (the Xcode command-line tools' python3 also works if it's
     3.10+)
-  - Debian / Ubuntu: `sudo apt install python3 python3-venv`
+  - Debian / Ubuntu / **WSL**: `sudo apt install python3 python3-venv wslu`
 - **An Asana account** with access to the boards you want to manage. A regular user account gets
   OAuth; guest and service accounts use a personal access token.
 
 You do **not** need `git`, `gh`, or an SSH key. pm-kit is published to a public marketplace, which
 Claude Code fetches without credentials.
+
+### On WSL
+
+Two packages that aren't there by default, both of which fail confusingly:
+
+- **`python3-venv`** — Ubuntu splits the `venv` module out of `python3`. Without it `/pm-setup`
+  dies at `python3 -m venv` with "ensurepip is not available", which reads like a Python bug.
+- **`wslu`** — provides `wslview`, which is how a Linux process opens a browser on Windows.
+  Without it the OAuth step starts its callback listener, prints a URL, and nothing happens — it
+  looks like a hang. WSL2 forwards `localhost:8372` back to Linux on its own, so the callback
+  itself works once a browser actually opens.
+
+Don't want to install `wslu`? Skip OAuth entirely — a personal access token needs no browser:
+
+```bash
+export ASANA_PAT=<token>     # app.asana.com → My settings → Apps
+```
+
+You may also see pip refuse to install anything system-wide (`externally-managed-environment`,
+PEP 668) on Ubuntu 24.04+. That's expected, and it's exactly why `/pm-setup` builds a venv at
+`~/.devhawk/pm/venv` instead of installing globally. Nothing to fix.
 
 ---
 
