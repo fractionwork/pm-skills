@@ -71,7 +71,14 @@ find_python() {
   return 1
 }
 
-deps_present() { [ -x "$VENV_PY" ] && "$VENV_PY" -c 'import mcp, requests' >/dev/null 2>&1; }
+# Probe the import the SERVER actually performs, not just the top-level package.
+# `import mcp` succeeds on mcp 2.x, which no longer ships mcp.server.fastmcp — so
+# the old check reported a healthy runtime for a venv that could not start the
+# server, and --check said "ready" while Claude Code showed no Asana tools.
+deps_present() {
+  [ -x "$VENV_PY" ] \
+    && "$VENV_PY" -c 'import requests; from mcp.server.fastmcp import FastMCP' >/dev/null 2>&1
+}
 
 # Legacy path is ~/.claude/scripts/, where the old installer pointed
 # ASANA_TOKEN_FILE (install.sh:523) — not ~/.claude/.
@@ -134,8 +141,18 @@ echo "pm-kit setup — $PM_HOME"
 if [ "$CHECK_ONLY" = 1 ]; then
   if BASE_PY="$(find_python)"; then ok "python: $BASE_PY ($("$BASE_PY" -V 2>&1))"
   else bad "no python >= 3.10 on PATH"; fi
-  if deps_present; then ok "runtime: venv ready (mcp, requests)"
-  else warn "runtime: not installed — run /pm-setup"; fi
+  if deps_present; then
+    ok "runtime: venv ready (mcp, requests)"
+  elif [ -x "$VENV_PY" ] && "$VENV_PY" -c 'import mcp' >/dev/null 2>&1; then
+    # Distinguishing this is the whole point: the venv looks complete, `import
+    # mcp` works, and the only outward symptom is that the Asana tools never
+    # appear. Naming the cause beats "not installed", which is not what happened.
+    bad "runtime: mcp $("$VENV_PY" -c 'import importlib.metadata as m; print(m.version("mcp"))' 2>/dev/null) is incompatible"
+    say "     pm-kit needs mcp 1.x — 2.0 removed the module the server imports"
+    say "     re-run /pm-setup to repair it (it will downgrade in place)"
+  else
+    warn "runtime: not installed — run /pm-setup"
+  fi
   if oauth_app_configured; then ok "oauth app: configured"
   elif [ -n "${ASANA_PAT:-}${ASANA_ACCESS_TOKEN:-}" ]; then ok "oauth app: not needed (using a PAT)"
   else warn "oauth app: not configured — /pm-setup will ask, or use ASANA_PAT"; fi

@@ -2,5 +2,11 @@
 # Install with: pip install -r scripts/requirements-mcp.txt
 #
 # asana_ops.py (reused for auth + REST) also needs `requests`.
-mcp>=1.2.0
+# Upper bound is load-bearing, not caution. asana_mcp.py uses
+# `from mcp.server.fastmcp import FastMCP`, and mcp 2.0.0 removed that module
+# outright. Unpinned, `pip install --upgrade` resolved to 2.x and the server
+# died at import — which Claude Code surfaces only as the Asana tools silently
+# not existing, because a server that exits during the handshake registers
+# nothing. Raising this bound means porting asana_mcp.py to the 2.x API first.
+mcp>=1.2.0,<2
 requests>=2.31.0
