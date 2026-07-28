@@ -259,6 +259,17 @@ def oauth_auth():
 
     print(f"Opening browser for Asana authorization...")
     print(f"If the browser doesn't open, visit:\n  {auth_url}\n")
+    if os.environ.get("WSL_DISTRO_NAME") or os.environ.get("WSL_INTEROP"):
+        # The browser runs on Windows; the callback listener is in WSL. Windows
+        # relays localhost to WSL, but not on every setup — mirrored networking,
+        # a firewall rule, or something already holding the port all break it,
+        # and the failure looks like the browser hanging on "can't reach this
+        # page". Say this BEFORE the 2-minute wait, because the recovery needs
+        # the URL from that failed page and the listener is gone afterwards.
+        print("  WSL: if the browser lands on 'can't reach this page' after you approve,")
+        print("  copy its full address and finish the handshake from inside WSL:")
+        print(f"      curl \"http://localhost:{CALLBACK_PORT}/callback?code=...&state=...\"")
+        print()
     webbrowser.open(auth_url)
 
     server_thread.join(timeout=120)
@@ -268,7 +279,20 @@ def oauth_auth():
         print(f"Auth error: {auth_error[0]}")
         sys.exit(1)
     if not auth_code[0]:
-        print("Timed out waiting for authorization.")
+        print("Timed out waiting for authorization (2 min).", file=sys.stderr)
+        if os.environ.get("WSL_DISTRO_NAME") or os.environ.get("WSL_INTEROP"):
+            print("  On WSL this usually means Windows didn't relay localhost:"
+                  f"{CALLBACK_PORT} into the distro.", file=sys.stderr)
+            print("  Re-run, and when the browser fails to load the callback, copy its full",
+                  file=sys.stderr)
+            print("  address and replay it from inside WSL while this is still waiting:",
+                  file=sys.stderr)
+            print(f"      curl \"http://localhost:{CALLBACK_PORT}/callback?code=...&state=...\"",
+                  file=sys.stderr)
+        print("  Or skip OAuth entirely — a personal access token needs no callback:",
+              file=sys.stderr)
+        print("      export ASANA_PAT=<token>   # app.asana.com → My settings → Apps",
+              file=sys.stderr)
         sys.exit(1)
 
     # Exchange code for tokens
