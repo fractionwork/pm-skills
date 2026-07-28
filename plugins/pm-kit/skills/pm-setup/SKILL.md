@@ -41,8 +41,18 @@ Python MCP server but cannot build the environment to run it, so that one step s
    app is not shipped with the plugin — hardcoding it once published a client secret to a public
    marketplace and tied the kit to a single Asana app. Point the user at
    <https://app.asana.com/0/my-apps>; the redirect URI must be `http://localhost:8372/callback`.
-   The secret is read without echo and stored at 0600 in `~/.devhawk/pm/workspace.json`, merged
-   alongside any `requiredFields` / `requiredAdmins` already there.
+   It is stored at 0600 in `~/.devhawk/pm/workspace.json`, merged alongside any `requiredFields` /
+   `requiredAdmins` already there.
+
+   **Run from here, this asks in a browser, not the terminal.** Your Bash tool gives the script no
+   controlling terminal, so it opens a small form on `localhost:8372` and waits (5 min) while the
+   user pastes the Client ID and secret into it. Tell them to expect that window. When it closes,
+   the Asana sign-in opens straight after.
+
+   > **Never ask for the client secret in chat and pass it as `--client-secret`.** That writes a
+   > live credential into the conversation transcript and into the machine's `ps` output. The form
+   > exists precisely so the secret goes browser → script → 0600 file and nowhere else. The flags
+   > are for scripted installs where the value is already in a secret store.
 
    If they have no app and don't want to create one, a personal access token skips OAuth
    entirely — `export ASANA_PAT=<token>`.
@@ -61,8 +71,16 @@ Python MCP server but cannot build the environment to run it, so that one step s
 - **PAT** — `export ASANA_PAT=<token>`; the setup detects it and skips both the app prompt and
   OAuth. Right for guest or service accounts, and for headless machines where no browser can open.
 
-Scripted / unattended installs pass the app on the command line or in the environment, and never
-prompt:
+How the OAuth app itself is collected depends on where the script is run:
+
+| Context | How it asks |
+|---|---|
+| Inside Claude Code (no TTY) | Browser form on `localhost:8372`, 5-minute wait |
+| A real terminal | Prompts inline; the secret is read with `read -s`, no echo |
+| Scripted / unattended | Flags or environment, never prompts |
+
+Scripted installs pass the app on the command line or in the environment — appropriate only when
+the value already comes from a secret store, since both are visible to `ps`:
 
 ```bash
 pm-setup.sh --client-id <id> --client-secret <secret>

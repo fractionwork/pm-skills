@@ -191,6 +191,176 @@ def generate_pkce():
     return verifier, challenge
 
 
+CONFIG_FORM = """<!doctype html>
+<meta charset="utf-8"><title>Connect Asana</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<style>
+ body{font:15px/1.5 system-ui,sans-serif;max-width:34rem;margin:3rem auto;padding:0 1.25rem;
+      color:#111;background:#fff}
+ @media (prefers-color-scheme:dark){body{color:#eee;background:#161616}
+   input{background:#222;color:#eee;border-color:#444}}
+ h1{font-size:1.3rem;margin-bottom:.25rem}
+ p.sub{margin-top:0;color:#666}
+ label{display:block;margin:1.1rem 0 .3rem;font-weight:600}
+ input{width:100%%;padding:.6rem;font-size:1rem;border:1px solid #ccc;border-radius:6px;
+       box-sizing:border-box;font-family:ui-monospace,monospace}
+ button{margin-top:1.5rem;padding:.65rem 1.4rem;font-size:1rem;border:0;border-radius:6px;
+        background:#2b6cb0;color:#fff;cursor:pointer}
+ .err{background:#fdd;border-left:3px solid #c00;padding:.6rem .8rem;border-radius:4px;color:#900}
+ code{background:#8881;padding:.1rem .35rem;border-radius:3px}
+ ol{color:#666;font-size:.92rem;padding-left:1.2rem}
+</style>
+<h1>Connect Asana</h1>
+<p class="sub">These stay on this machine. Nothing is sent anywhere but Asana.</p>
+%(error)s
+<ol>
+  <li>Open <a href="https://app.asana.com/0/my-apps" target="_blank">app.asana.com/0/my-apps</a></li>
+  <li>Use an existing app, or create one</li>
+  <li>Set its redirect URL to <code>http://localhost:%(port)d/callback</code></li>
+  <li>Copy the Client ID and Client secret in below</li>
+</ol>
+<form method="POST" action="/configure?t=%(token)s">
+  <label for="cid">Client ID</label>
+  <input id="cid" name="client_id" autocomplete="off" autofocus required>
+  <label for="cs">Client secret</label>
+  <input id="cs" name="client_secret" type="password" autocomplete="off" required>
+  <button type="submit">Save and continue</button>
+</form>
+"""
+
+CONFIG_DONE = """<!doctype html>
+<meta charset="utf-8"><title>Saved</title>
+<style>body{font:15px/1.5 system-ui,sans-serif;max-width:34rem;margin:3rem auto;padding:0 1.25rem}
+@media (prefers-color-scheme:dark){body{color:#eee;background:#161616}}</style>
+<h2>Saved.</h2>
+<p>Asana sign-in opens next — you can leave this tab.</p>
+"""
+
+
+def save_oauth_app(client_id: str, client_secret: str) -> None:
+    """Merge the OAuth app into workspace.json without disturbing other blocks.
+
+    The file also carries custom-field GIDs and the required-admin list, so this
+    reads-modifies-writes rather than replacing: a user who configured those
+    should not lose them by re-running setup.
+    """
+    global _WS_CACHE
+    try:
+        cfg = json.loads(WORKSPACE_CONFIG.read_text())
+    except (OSError, ValueError):
+        cfg = {}
+    cfg.setdefault("oauth", {})
+    cfg["oauth"]["clientId"] = client_id
+    cfg["oauth"]["clientSecret"] = client_secret
+    _write_private(WORKSPACE_CONFIG, json.dumps(cfg, indent=2) + "\n")
+    _WS_CACHE = None  # force reload; the flow reads the app back immediately
+
+
+def configure_app_via_browser(timeout: int = 300) -> bool:
+    """Collect the OAuth app through a loopback form. Returns True if saved.
+
+    WHY THIS EXISTS: /pm-setup is normally run from inside Claude Code, whose
+    Bash tool gives the script no controlling terminal. `read` cannot prompt
+    there, so the terminal path exits and tells the user to re-run in a shell —
+    which for a PM on a fresh machine is exactly the thing they were avoiding.
+
+    The obvious alternative, having Claude pass --client-secret, is worse: a live
+    secret would land in the conversation transcript and in this host's `ps`
+    output. Typed into a page served on loopback, it goes browser -> this
+    process -> 0600 file and appears nowhere else.
+    """
+    token = secrets.token_urlsafe(32)
+    url = f"http://localhost:{CALLBACK_PORT}/configure?t={token}"
+    saved = [False]
+
+    def page(error: str = "") -> bytes:
+        block = f'<p class="err">{error}</p>' if error else ""
+        return (CONFIG_FORM % {"error": block, "token": token,
+                               "port": CALLBACK_PORT}).encode()
+
+    class ConfigHandler(http.server.BaseHTTPRequestHandler):
+        def _authed(self) -> bool:
+            qs = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
+            # Any page in the browser can POST to loopback; only one that can
+            # read this URL knows the token. Without it, a hostile tab could
+            # silently overwrite the stored app with its own.
+            return secrets.compare_digest(qs.get("t", [""])[0], token)
+
+        def _send(self, body: bytes, code: int = 200) -> None:
+            self.send_response(code)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            # Nothing here should ever be cached — it renders a credential form.
+            self.send_header("Cache-Control", "no-store")
+            self.end_headers()
+            self.wfile.write(body)
+
+        def do_GET(self):
+            if not self._authed():
+                self._send(b"<h2>Not found</h2>", 404)
+                return
+            self._send(page())
+
+        def do_POST(self):
+            if not self._authed():
+                self._send(b"<h2>Not found</h2>", 404)
+                return
+            try:
+                n = int(self.headers.get("Content-Length", 0))
+            except ValueError:
+                n = 0
+            # Bound the read: this is an unauthenticated socket until the token
+            # is checked, and a form of this shape is a few hundred bytes.
+            fields = urllib.parse.parse_qs(self.rfile.read(min(n, 8192)).decode("utf-8", "replace"))
+            cid = fields.get("client_id", [""])[0].strip()
+            secret = fields.get("client_secret", [""])[0].strip()
+            if not cid or not secret:
+                self._send(page("Both fields are required."), 400)
+                return
+            save_oauth_app(cid, secret)
+            self._send(CONFIG_DONE.encode())
+            saved[0] = True
+
+        def log_message(self, *args):
+            pass
+
+    try:
+        server = http.server.HTTPServer(("localhost", CALLBACK_PORT), ConfigHandler)
+    except OSError as e:
+        print(f"Could not open the setup form on localhost:{CALLBACK_PORT}: {e}",
+              file=sys.stderr)
+        print("  Something else is using that port. Free it and re-run, or set",
+              file=sys.stderr)
+        print("  ASANA_CLIENT_ID / ASANA_CLIENT_SECRET in the environment instead.",
+              file=sys.stderr)
+        return False
+
+    print("Enter your Asana app details in the browser window that just opened.")
+    print(f"If it didn't open, go to:\n  {url}\n")
+    if os.environ.get("WSL_DISTRO_NAME") or os.environ.get("WSL_INTEROP"):
+        print("  WSL: if the page won't load, open that address in Windows directly.")
+        print()
+    webbrowser.open(url)
+
+    # serve_forever rather than one handle_request: the browser makes several
+    # requests here (the form, a favicon, then the POST, plus any correction
+    # round-trip after a validation error).
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    deadline = time.time() + timeout
+    while not saved[0] and time.time() < deadline:
+        time.sleep(0.2)
+    server.shutdown()
+    server.server_close()
+
+    if not saved[0]:
+        print(f"Timed out after {timeout // 60} minutes waiting for the form.",
+              file=sys.stderr)
+        return False
+    print("Saved to", WORKSPACE_CONFIG)
+    return True
+
+
 def oauth_auth():
     """Run PKCE OAuth flow: open browser, catch callback, exchange for tokens."""
     client_id = get_client_id()
@@ -1373,6 +1543,7 @@ def main():
 
     parser = argparse.ArgumentParser(description="Asana workspace operations")
     parser.add_argument("--auth", action="store_true", help="Run PKCE OAuth flow")
+    parser.add_argument("--configure-app", action="store_true", help="Collect the Asana OAuth app (client id + secret) via a loopback browser form and save it to workspace.json. Used when /pm-setup runs inside Claude Code, where there is no terminal to type a secret into.")
     parser.add_argument("--token", action="store_true", help="Print current access token to stdout (for use by other tools). Auto-auths if missing.")
     parser.add_argument("--hygiene", metavar="PROJECT_GID", help="Run full hygiene audit + fix on a project")
     parser.add_argument("--estimate", metavar="PROJECT_GID", help="Auto-estimate story points on unestimated tasks")
@@ -1395,6 +1566,9 @@ def main():
     parser.add_argument("--list-projects", action="store_true", help="List non-archived projects in the active workspace (gid<TAB>name). Lets Claude show projects by name so the user picks one to fence the MCP to — no hunting GIDs from URLs.")
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
+
+    if args.configure_app:
+        sys.exit(0 if configure_app_via_browser() else 1)
 
     if args.auth:
         oauth_auth()

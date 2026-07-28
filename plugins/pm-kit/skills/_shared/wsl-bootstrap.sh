@@ -38,9 +38,39 @@ fi
 . /etc/os-release 2>/dev/null
 echo "  ${PRETTY_NAME:-unknown distro}"
 
+# ── supported release ───────────────────────────────────────────────────────
+# One release, on purpose. The apt source format, the Python version and the
+# package names below are all the 24.04 ones. On another release the mismatched
+# branches don't error — they quietly do nothing, and the failure resurfaces
+# much later as something that looks unrelated (universe never enabled, so no
+# wslview, so OAuth appears to hang). Pinning is the honest option until there
+# is a reason to carry more than one.
+SUPPORTED_VERSION="24.04"
+
+supported_release() {
+  [ "${ID:-}" = "ubuntu" ] && [ "${VERSION_ID:-}" = "$SUPPORTED_VERSION" ]
+}
+
+unsupported_note() {
+  cat <<EOF
+
+  This is built for Ubuntu $SUPPORTED_VERSION. Install it from Windows
+  PowerShell (not from this window):
+
+      wsl --install Ubuntu-$SUPPORTED_VERSION
+
+  Then open "Ubuntu $SUPPORTED_VERSION" from the Start menu and run this
+  again there. Nothing you already have is removed — the two sit side by
+  side, and you can pick either one from the Start menu.
+
+EOF
+}
+
 # ── status only ─────────────────────────────────────────────────────────────
 if [ "$CHECK_ONLY" = 1 ]; then
   step "What's installed"
+  supported_release && ok "Ubuntu $SUPPORTED_VERSION" \
+                    || warn "${PRETTY_NAME:-unknown} — this is built for Ubuntu $SUPPORTED_VERSION"
   for c in git curl python3 gh claude; do
     have "$c" && ok "$c" || warn "$c — missing"
   done
@@ -48,6 +78,20 @@ if [ "$CHECK_ONLY" = 1 ]; then
   have wslview && ok "wslview (opens links in a browser)" || warn "wslview — missing (optional)"
   echo
   exit 0
+fi
+
+if ! supported_release; then
+  bad "Wrong Ubuntu version — found ${PRETTY_NAME:-unknown}."
+  unsupported_note
+  # Deliberately not a prompt: someone who knows why they want this can set the
+  # variable, and everyone else gets a stop with instructions instead of a
+  # half-finished install they cannot diagnose.
+  if [ -z "${FRACTION_ALLOW_ANY_UBUNTU:-}" ]; then
+    printf '  \033[2m(to run it here anyway: FRACTION_ALLOW_ANY_UBUNTU=1 bash %s)\033[0m\n\n' "$0"
+    exit 1
+  fi
+  warn "continuing on an unsupported release because FRACTION_ALLOW_ANY_UBUNTU is set"
+  echo
 fi
 
 echo "  This installs git, Python, the GitHub CLI and Claude Code."

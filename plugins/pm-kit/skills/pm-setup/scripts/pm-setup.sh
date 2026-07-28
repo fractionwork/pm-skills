@@ -55,6 +55,7 @@ done
 ok()   { printf '  \033[32m✓\033[0m %s\n' "$1"; }
 warn() { printf '  \033[33m⊙\033[0m %s\n' "$1"; }
 bad()  { printf '  \033[31m✗\033[0m %s\n' "$1"; }
+say()  { printf '  %s\n' "$1"; }
 
 # ── locate a base interpreter ───────────────────────────────────────────────
 # The MCP SDK needs >= 3.10. Check the version rather than trusting `python3`:
@@ -190,35 +191,14 @@ else
   if [ -n "${ASANA_PAT:-}${ASANA_ACCESS_TOKEN:-}" ]; then
     ok "using the PAT from the environment"
   else
-    # Collect the OAuth app before starting the flow. It is deliberately not
-    # shipped: hardcoding it published a client secret to a public marketplace
-    # and tied the kit to a single Asana app.
-    if ! oauth_app_configured; then
-      if [ -t 0 ]; then
-        echo
-        echo "  Asana OAuth app — from https://app.asana.com/0/my-apps"
-        echo "  (redirect URI must be http://localhost:8372/callback)"
-        echo
-        echo "  No app? Press Enter twice to skip and use a personal access token instead."
-        [ -n "$CLIENT_ID" ] || { printf "    Client ID: "; read -r CLIENT_ID; }
-        # -s so the secret never lands in the terminal or scrollback.
-        [ -n "$CLIENT_SECRET" ] || { printf "    Client secret: "; read -rs CLIENT_SECRET; echo; }
-      fi
-      if [ -z "$CLIENT_ID" ] || [ -z "$CLIENT_SECRET" ]; then
-        bad "no Asana OAuth app configured, and no PAT set."
-        echo "     Either re-run with --client-id/--client-secret," >&2
-        echo "     or use a token instead:  export ASANA_PAT=<token>" >&2
-        echo "     (app.asana.com → My settings → Apps → Personal access tokens)" >&2
-        exit 1
-      fi
-      save_oauth_app "$CLIENT_ID" "$CLIENT_SECRET"
-      ok "oauth app saved to $WS_CONFIG (0600)"
-    fi
-
     # Python's webbrowser often finds no handler on WSL — _tryorder comes back
-    # empty, webbrowser.open() returns quietly, and the OAuth step looks like a
-    # hang. Point BROWSER at our opener, which prefers wslview and otherwise
-    # goes through PowerShell's Start-Process.
+    # empty, webbrowser.open() returns quietly, and the step looks like a hang.
+    # Point BROWSER at our opener, which prefers wslview and otherwise goes
+    # through PowerShell's Start-Process.
+    #
+    # This has to happen BEFORE the app-config block below, not just before the
+    # OAuth call: when there is no terminal, that block opens a browser too, and
+    # it is the one on WSL that would otherwise silently do nothing.
     #
     # NOT explorer.exe: it resolves its argument as a PATH first, and from a WSL
     # working directory Windows can't map it gives up and opens a File Explorer
@@ -241,12 +221,52 @@ else
         && say "using $SHARED/open-url.sh to open the browser (WSL)"
     fi
 
+    # Collect the OAuth app before starting the flow. It is deliberately not
+    # shipped: hardcoding it published a client secret to a public marketplace
+    # and tied the kit to a single Asana app.
+    if ! oauth_app_configured; then
+      if [ -t 0 ]; then
+        echo
+        echo "  Asana OAuth app — from https://app.asana.com/0/my-apps"
+        echo "  (redirect URI must be http://localhost:8372/callback)"
+        echo
+        echo "  No app? Press Enter twice to skip and use a personal access token instead."
+        [ -n "$CLIENT_ID" ] || { printf "    Client ID: "; read -r CLIENT_ID; }
+        # -s so the secret never lands in the terminal or scrollback.
+        [ -n "$CLIENT_SECRET" ] || { printf "    Client secret: "; read -rs CLIENT_SECRET; echo; }
+        if [ -n "$CLIENT_ID" ] && [ -n "$CLIENT_SECRET" ]; then
+          save_oauth_app "$CLIENT_ID" "$CLIENT_SECRET"
+          ok "oauth app saved to $WS_CONFIG (0600)"
+        fi
+      else
+        # No controlling terminal — this is /pm-setup running inside Claude Code,
+        # where `read` cannot prompt. Collect the app in a loopback browser form
+        # rather than dead-ending, so setup completes without dropping the user
+        # into a shell. Deliberately NOT done by having Claude pass
+        # --client-secret: that writes a live secret into the conversation
+        # transcript and into this host's `ps` output.
+        say "no terminal here — opening a browser form for your Asana app details"
+        "$VENV_PY" "$SHARED/asana_ops.py" --configure-app \
+          && ok "oauth app saved to $WS_CONFIG (0600)"
+      fi
+
+      # Re-test rather than checking the shell vars: the browser form writes
+      # workspace.json directly and leaves CLIENT_ID/CLIENT_SECRET empty here.
+      if ! oauth_app_configured; then
+        bad "no Asana OAuth app configured, and no PAT set."
+        echo "     Either re-run with --client-id/--client-secret," >&2
+        echo "     or use a token instead:  export ASANA_PAT=<token>" >&2
+        echo "     (app.asana.com → My settings → Apps → Personal access tokens)" >&2
+        exit 1
+      fi
+    fi
+
     echo "  starting Asana OAuth — a browser window will open…"
     if ! ASANA_CLIENT_ID="$CLIENT_ID" ASANA_CLIENT_SECRET="$CLIENT_SECRET" \
          "$VENV_PY" "$SHARED/asana_ops.py" --auth; then
       bad "authentication failed."
-      echo "     If no browser opened: set BROWSER (e.g. export BROWSER=explorer.exe on WSL)," >&2
-      echo "     or check the app's redirect URI is http://localhost:8372/callback." >&2
+      echo "     If no browser opened, open the URL printed above by hand." >&2
+      echo "     Check the app's redirect URI is http://localhost:8372/callback," >&2
       echo "     or use a token instead:  export ASANA_PAT=<token>" >&2
       exit 1
     fi
