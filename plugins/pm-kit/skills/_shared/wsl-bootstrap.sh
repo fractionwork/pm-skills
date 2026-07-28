@@ -72,10 +72,15 @@ else
   sudo apt-get install -y -qq software-properties-common >/dev/null 2>&1
   if have add-apt-repository; then
     sudo add-apt-repository -y universe >/dev/null 2>&1
-  else
-    # deb822 format on Ubuntu 24.04+; idempotent, appends universe only if absent
+  elif [ -f /etc/apt/sources.list.d/ubuntu.sources ]; then
+    # deb822, Ubuntu 24.04+. Idempotent: appends universe only where absent.
     sudo sed -i '/^Components:/{/universe/!s/$/ universe/}' \
-      /etc/apt/sources.list.d/ubuntu.sources 2>/dev/null
+      /etc/apt/sources.list.d/ubuntu.sources
+  elif [ -s /etc/apt/sources.list ]; then
+    # Legacy one-line format, 22.04 and earlier. Without this branch the deb822
+    # sed above silently edits nothing on those images and universe never
+    # arrives — a failure with no error message anywhere.
+    sudo sed -i '/^deb /{/ universe/!s/$/ universe/}' /etc/apt/sources.list
   fi
   sudo apt-get update -qq 2>/dev/null
   if sudo apt-get install -y -qq wslu >/dev/null 2>&1; then
