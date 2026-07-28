@@ -215,16 +215,18 @@ else
       ok "oauth app saved to $WS_CONFIG (0600)"
     fi
 
-    # On WSL, Python's webbrowser finds nothing unless wslu (wslview) or a
-    # desktop is installed — webbrowser.open() then returns quietly and the user
-    # sees a hang. explorer.exe opens a URL on the Windows side and is always on
-    # PATH under WSL interop, so point BROWSER at it rather than requiring a
-    # package from Ubuntu's universe component that may not even be enabled.
-    if [ -z "${BROWSER:-}" ] && [ -n "${WSL_DISTRO_NAME:-}${WSL_INTEROP:-}" ] \
-       && ! command -v wslview >/dev/null 2>&1 \
-       && command -v explorer.exe >/dev/null 2>&1; then
-      export BROWSER=explorer.exe
-      say "WSL detected without wslview — opening the browser via explorer.exe"
+    # Python's webbrowser often finds no handler on WSL — _tryorder comes back
+    # empty, webbrowser.open() returns quietly, and the OAuth step looks like a
+    # hang. Point BROWSER at our opener, which prefers wslview and otherwise
+    # goes through PowerShell's Start-Process.
+    #
+    # NOT explorer.exe: it resolves its argument as a PATH first, and from a WSL
+    # working directory Windows can't map it gives up and opens a File Explorer
+    # window instead of the browser.
+    if [ -z "${BROWSER:-}" ] && [ -x "$SHARED/open-url.sh" ]; then
+      export BROWSER="$SHARED/open-url.sh"
+      [ -n "${WSL_DISTRO_NAME:-}${WSL_INTEROP:-}" ] \
+        && say "using $SHARED/open-url.sh to open the browser (WSL)"
     fi
 
     echo "  starting Asana OAuth — a browser window will open…"
