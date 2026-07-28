@@ -27,9 +27,18 @@ Two packages that aren't there by default, both of which fail confusingly:
   dies at `python3 -m venv` with "ensurepip is not available", which reads like a Python bug.
 - **A way to open a browser** — with neither `wslview` (from `wslu`) nor a desktop, Python's
   `webbrowser.open()` finds no handler and returns quietly, so the OAuth step looks like a hang.
-  `/pm-setup` handles this for you: on WSL with no `wslview` it points `BROWSER` at
-  `explorer.exe`, which interop always puts on `PATH`. WSL2 forwards `localhost:8372` back to
-  Linux on its own, so the callback works once a browser opens.
+  `/pm-setup` handles this for you by pointing `BROWSER` at `open-url.sh`, which prefers `wslview`
+  and otherwise calls PowerShell's `Start-Process`. WSL2 forwards `localhost:8372` back to Linux
+  on its own, so the callback works once a browser opens.
+
+  Not `explorer.exe`: it resolves its argument as a path first, and from a working directory
+  Windows cannot map it opens a File Explorer window instead of the browser.
+
+- **Windows interop** — every one of those openers works by running a Windows binary from inside
+  the distro. `[interop] enabled=false` in `/etc/wsl.conf` turns that off, and then `wslview` and
+  `powershell.exe` are simply "command not found" with nothing to explain why. `wsl-bootstrap.sh`
+  checks this and repairs it; the fix needs `wsl --shutdown` in Windows PowerShell to take effect,
+  because interop is registered when the distro boots.
 
   Want `wslview` anyway? It's in Ubuntu's **universe** component, so
   `E: Unable to locate package wslu` means universe isn't enabled rather than the package being

@@ -39,8 +39,17 @@ if is_wsl; then
   # Single-quote for PowerShell, doubling any embedded quote. OAuth URLs carry
   # & and ? — unquoted, PowerShell would treat them as syntax.
   ps_url=$(printf "%s" "$url" | sed "s/'/''/g")
-  for ps in powershell.exe pwsh.exe; do
-    if command -v "$ps" >/dev/null 2>&1; then
+  # The absolute path covers appendWindowsPath=false in /etc/wsl.conf: interop
+  # still runs .exe files, but no Windows directory is on PATH, so the bare name
+  # resolves to nothing. That combination looks identical to interop being off
+  # unless the full path is tried.
+  #
+  # The drive is not assumed to be at /mnt/c — `[automount] root=` in wsl.conf
+  # moves every Windows mount, so the default is a fallback, not a certainty.
+  WIN_C="${WIN_C:-/mnt/c}"
+  for ps in powershell.exe pwsh.exe \
+            "$WIN_C/Windows/System32/WindowsPowerShell/v1.0/powershell.exe"; do
+    if command -v "$ps" >/dev/null 2>&1 || [ -x "$ps" ]; then
       run "$ps" -NoProfile -NonInteractive -Command "Start-Process '$ps_url'"
       exit $?
     fi
@@ -57,6 +66,21 @@ case "$(uname -s)" in
   Darwin) command -v open >/dev/null 2>&1 && { run open "$url"; exit $?; } ;;
   *)      command -v xdg-open >/dev/null 2>&1 && { run xdg-open "$url"; exit $?; } ;;
 esac
+
+# On WSL, reaching here almost always means interop is off rather than that no
+# browser exists — the browser is on Windows and is fine. Say which, because the
+# fixes are unrelated and "no way to open a browser" sends people looking for a
+# Linux one they do not need.
+BINFMT_DIR="${BINFMT_DIR:-/proc/sys/fs/binfmt_misc}"
+if is_wsl && [ ! -e "$BINFMT_DIR/WSLInterop" ] \
+          && [ ! -e "$BINFMT_DIR/WSLInterop-late" ]; then
+  echo "open-url.sh: Windows interop is disabled, so no Windows program can run." >&2
+  echo "  Fix it with:  [interop] enabled=true  in /etc/wsl.conf," >&2
+  echo "  then run 'wsl --shutdown' in Windows PowerShell and reopen Ubuntu." >&2
+  echo "  Until then, open this yourself:" >&2
+  echo "  $url" >&2
+  exit 1
+fi
 
 echo "open-url.sh: no way to open a browser — visit this yourself:" >&2
 echo "  $url" >&2
