@@ -12,7 +12,7 @@ required; this kit manages boards, not code.
   still ship 3.9 as `python3`; the setup detects that and tells you.
   - macOS: `brew install python@3.12` (the Xcode command-line tools' python3 also works if it's
     3.10+)
-  - Debian / Ubuntu / **WSL**: `sudo apt install python3 python3-venv wslu`
+  - Debian / Ubuntu / **WSL**: `sudo apt install python3 python3-venv`
 - **An Asana account** with access to the boards you want to manage. A regular user account gets
   OAuth; guest and service accounts use a personal access token.
 
@@ -25,12 +25,17 @@ Two packages that aren't there by default, both of which fail confusingly:
 
 - **`python3-venv`** — Ubuntu splits the `venv` module out of `python3`. Without it `/pm-setup`
   dies at `python3 -m venv` with "ensurepip is not available", which reads like a Python bug.
-- **`wslu`** — provides `wslview`, which is how a Linux process opens a browser on Windows.
-  Without it the OAuth step starts its callback listener, prints a URL, and nothing happens — it
-  looks like a hang. WSL2 forwards `localhost:8372` back to Linux on its own, so the callback
-  itself works once a browser actually opens.
+- **A way to open a browser** — with neither `wslview` (from `wslu`) nor a desktop, Python's
+  `webbrowser.open()` finds no handler and returns quietly, so the OAuth step looks like a hang.
+  `/pm-setup` handles this for you: on WSL with no `wslview` it points `BROWSER` at
+  `explorer.exe`, which interop always puts on `PATH`. WSL2 forwards `localhost:8372` back to
+  Linux on its own, so the callback works once a browser opens.
 
-Don't want to install `wslu`? Skip OAuth entirely — a personal access token needs no browser:
+  Want `wslview` anyway? It's in Ubuntu's **universe** component, so
+  `E: Unable to locate package wslu` means universe isn't enabled rather than the package being
+  gone: `sudo add-apt-repository universe && sudo apt update && sudo apt install -y wslu`.
+
+Either way, a personal access token skips the browser entirely:
 
 ```bash
 export ASANA_PAT=<token>     # app.asana.com → My settings → Apps

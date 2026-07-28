@@ -215,11 +215,24 @@ else
       ok "oauth app saved to $WS_CONFIG (0600)"
     fi
 
+    # On WSL, Python's webbrowser finds nothing unless wslu (wslview) or a
+    # desktop is installed — webbrowser.open() then returns quietly and the user
+    # sees a hang. explorer.exe opens a URL on the Windows side and is always on
+    # PATH under WSL interop, so point BROWSER at it rather than requiring a
+    # package from Ubuntu's universe component that may not even be enabled.
+    if [ -z "${BROWSER:-}" ] && [ -n "${WSL_DISTRO_NAME:-}${WSL_INTEROP:-}" ] \
+       && ! command -v wslview >/dev/null 2>&1 \
+       && command -v explorer.exe >/dev/null 2>&1; then
+      export BROWSER=explorer.exe
+      say "WSL detected without wslview — opening the browser via explorer.exe"
+    fi
+
     echo "  starting Asana OAuth — a browser window will open…"
     if ! ASANA_CLIENT_ID="$CLIENT_ID" ASANA_CLIENT_SECRET="$CLIENT_SECRET" \
          "$VENV_PY" "$SHARED/asana_ops.py" --auth; then
       bad "authentication failed."
-      echo "     Check the app's redirect URI is http://localhost:8372/callback," >&2
+      echo "     If no browser opened: set BROWSER (e.g. export BROWSER=explorer.exe on WSL)," >&2
+      echo "     or check the app's redirect URI is http://localhost:8372/callback." >&2
       echo "     or use a token instead:  export ASANA_PAT=<token>" >&2
       exit 1
     fi
