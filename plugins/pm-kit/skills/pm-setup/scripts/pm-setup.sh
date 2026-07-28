@@ -71,13 +71,17 @@ find_python() {
   return 1
 }
 
-# Probe the import the SERVER actually performs, not just the top-level package.
-# `import mcp` succeeds on mcp 2.x, which no longer ships mcp.server.fastmcp — so
-# the old check reported a healthy runtime for a venv that could not start the
-# server, and --check said "ready" while Claude Code showed no Asana tools.
+# Import the server module itself rather than guessing at its dependencies. This
+# is the exact chain the MCP server performs at startup, so it cannot drift from
+# what actually has to work — and it covers both SDK majors for free, since
+# asana_mcp.py already selects between 2.x's MCPServer and 1.x's FastMCP.
+#
+# `import mcp` was the old check. It succeeds on any version, including ones with
+# no usable server class, so --check reported "ready" for a venv that could not
+# start the server while Claude Code showed no Asana tools at all.
 deps_present() {
   [ -x "$VENV_PY" ] \
-    && "$VENV_PY" -c 'import requests; from mcp.server.fastmcp import FastMCP' >/dev/null 2>&1
+    && "$VENV_PY" -c "import sys; sys.path.insert(0, r'$SHARED'); import asana_mcp" >/dev/null 2>&1
 }
 
 # Legacy path is ~/.claude/scripts/, where the old installer pointed
@@ -147,9 +151,9 @@ if [ "$CHECK_ONLY" = 1 ]; then
     # Distinguishing this is the whole point: the venv looks complete, `import
     # mcp` works, and the only outward symptom is that the Asana tools never
     # appear. Naming the cause beats "not installed", which is not what happened.
-    bad "runtime: mcp $("$VENV_PY" -c 'import importlib.metadata as m; print(m.version("mcp"))' 2>/dev/null) is incompatible"
-    say "     pm-kit needs mcp 1.x — 2.0 removed the module the server imports"
-    say "     re-run /pm-setup to repair it (it will downgrade in place)"
+    bad "runtime: mcp $("$VENV_PY" -c 'import importlib.metadata as m; print(m.version("mcp"))' 2>/dev/null) cannot start the server"
+    say "     pm-kit supports mcp 1.x and 2.x; this version exposes neither"
+    say "     server class, or a dependency is missing. Re-run /pm-setup to repair."
   else
     warn "runtime: not installed — run /pm-setup"
   fi

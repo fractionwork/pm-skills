@@ -45,14 +45,27 @@ from datetime import datetime, timezone
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import asana_ops as ops  # noqa: E402
 
-from mcp.server.fastmcp import FastMCP  # noqa: E402
+# The SDK renamed its high-level server class in 2.0: mcp.server.fastmcp.FastMCP
+# became mcp.server.MCPServer, and the old module was removed rather than
+# deprecated — so a machine that upgraded got ModuleNotFoundError at import, and
+# because a server that dies during the handshake registers nothing, the only
+# symptom was the Asana tools silently not existing.
+#
+# Both classes cover the surface used here: a name in the constructor, a bare
+# @tool() decorator, and run() defaulting to stdio. Supporting both means a venv
+# does not have to move in lockstep with the plugin. The two names are disjoint
+# across majors, so this cannot pick the wrong one.
+try:
+    from mcp.server import MCPServer as _McpServer  # noqa: E402  (mcp >= 2.0)
+except ImportError:
+    from mcp.server.fastmcp import FastMCP as _McpServer  # noqa: E402  (mcp 1.x)
 
 # asana_ops.log() prints every API call to stdout AND a log file. In an stdio
 # MCP server stdout is the JSON-RPC channel, so silence it — protocol integrity
 # over call tracing.
 ops.log = lambda *a, **k: None
 
-mcp = FastMCP("asana")
+mcp = _McpServer("asana")
 
 # Accept common truthy spellings (1/true/yes/on) so a Docker/k8s-style
 # ASANA_READ_ONLY=true doesn't silently leave writes enabled.
