@@ -48,13 +48,27 @@ Board-view projects use these columns in order:
 | INBOX | Raw requirements not yet discussed with stakeholders. Some will graduate to BACKLOG; some will be rejected. |
 | BACKLOG | Validated, unrefined, unassigned tasks — stakeholder buy-in confirmed but not yet ready to work. |
 | TODO | Refined and ready to start (active sprint only) |
-| WIP | Actively being worked on |
-| READY FOR REVIEW | PR created, awaiting review |
+| WIP | Actively being worked on — **including a PR still in draft** |
+| READY FOR REVIEW | PR created **and out of draft**, awaiting a reviewer |
 | READY FOR TESTING | Code merged, needs QA |
 | READY FOR RELEASE | Tested, awaiting deploy |
 | DONE | Shipped |
 
 Not all projects need all sections. At minimum: INBOX, BACKLOG, TODO, WIP, REVIEW, DONE.
+
+**A draft PR keeps its card in WIP.** The distinction that matters is *who is
+blocked* — a draft waits on the author, a ready PR waits on a reviewer. Parking
+drafts in READY FOR REVIEW makes the column useless for anyone scanning for work
+to pick up; one project accumulated six cards there behind draft PRs before it
+was noticed. Move the card forward when the PR comes out of draft, not when it
+is opened.
+
+**Verify against the deployed branch, not the merged one.** READY FOR RELEASE
+means the work is in the environment that section maps to — check that the merge
+commit is actually on that branch (`git branch -r --contains <sha>`), not merely
+that a PR says "Merged". A monorepo where `dev` auto-deploys and `main` is
+production will happily show a PR as merged while the work is nowhere near the
+customer.
 
 ### Flow stages: INBOX → BACKLOG → TODO
 
