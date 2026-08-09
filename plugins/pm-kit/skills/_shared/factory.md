@@ -40,6 +40,25 @@ nothing and cost nothing.
 transitions, only as the mirror of something the human just did (finished a
 card, picked one up). Never speculatively.
 
+**May, after the work — `record_activity`.** One row per completed skill run, so
+`/factory stats` and the panel describe the whole delivery team rather than only
+its agent half. The rules:
+
+- **After, not before.** Call it once, with the outcome you already know. Do not
+  open a row at the start and hope to close it — a skill that ends early leaves
+  a row running forever, which is the ghost-agent bug the panel already had to
+  fix once.
+- **Namespace the activity** — `ship-kit/feature-build`, not `build`. Stats group
+  by that string, so an agent stage name would merge two populations into one
+  row and quietly corrupt both.
+- **`actor_id` is the human's email**, and it is self-reported: the API token
+  authenticates the token, not the person. A convention among colleagues, not an
+  audit control.
+- **Record failures too.** A skill that only records its successes produces a
+  100% success rate, which is worse than no rate at all.
+- The server forces `kind: 'human'` and records no cost, so neither is yours to
+  get wrong.
+
 **Never.** Do not enable a project, unpause one, change `trust.*`,
 `pipeline.activities`, or a gate floor from inside a delivery skill. Those are
 `onboard`'s job and a human's decision. A skill that quietly widens what the
