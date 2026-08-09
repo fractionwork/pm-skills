@@ -228,6 +228,39 @@ After creation, report:
   - INBOX: "Want me to schedule a stakeholder discussion comment when that conversation happens?"
   - BACKLOG (sprint in flight): "Want to commit this to the active sprint?"
 
+## Step 7.5: The factory already knows — say so, do not duplicate
+
+Only if this repo is a **registered factory project**. Read
+`${CLAUDE_PLUGIN_ROOT}/skills/_shared/factory.md` for the contract; an
+unregistered project skips this in silence.
+
+**Do NOT create a second card.** The card you just made is on the board, and the
+factory intakes from the board on its own poll. Creating one through the factory
+too would produce two cards for one request — the exact duplication `add-card`'s
+whole dedup step exists to prevent.
+
+What to do instead is tell the human **whether the factory will pick it up**,
+because the answer is usually "no" and the reason is invisible from the board:
+
+```
+get_project_config(project_key)
+```
+
+- **An intake gate is set** (e.g. `Release ∈ {July Release}`) and this card does
+  not carry that value → the factory will NOT see it. Say so, and offer to set
+  the field. This is the single most common surprise: the card is on the board,
+  it looks fine, and nothing ever happens to it.
+- **The card landed in INBOX** → it is in the factory's intake column, and the
+  next poll will consider it.
+- **The card landed in BACKLOG** → most intake paths only read INBOX, so the
+  factory will likely never pick it up. Correct for work a human is going to do;
+  worth saying out loud if they expected otherwise.
+
+One line, not a lecture:
+
+> `factory:` this project gates intake on **Release = July Release**. This card
+> has no Release set, so the factory will not pick it up. Want me to set it?
+
 ## Project hygiene assumptions
 
 This skill is the **card-level enforcement layer**. It assumes the project itself is already healthy — specifically:

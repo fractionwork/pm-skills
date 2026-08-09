@@ -6,6 +6,12 @@ Initial extraction from `devhawk-seed` as a Claude Code plugin. The five board s
 unchanged in substance; what changed is how they are distributed, how they find their runtime,
 and which of the operating rules are enforced rather than merely written down.
 
+- **feat: `add-card` says whether the factory will actually pick the card up.** It does NOT create
+  a second card — the factory intakes from the board, and a second create is the duplication the
+  dedup step exists to prevent. It reports the intake gate instead, which is the common surprise:
+  a card sits on the board looking fine and nothing ever happens to it because it carries no
+  `Release` value. Registration is the opt-in; unregistered projects see no change.
+
 - **feat: ship as a plugin instead of an installer.** `/plugin install pm-kit@pm-skills` replaces
   a 817-line `install.sh` that reimplemented config-dir resolution, legacy symlink migration,
   Python discovery, venv bootstrap, profile filtering, and marker-splicing into
