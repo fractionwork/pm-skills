@@ -391,11 +391,40 @@ phase_prereqs() {
     ok "Claude Code ($(claude --version 2>/dev/null | head -1))"
   else
     if curl -fsSL https://claude.ai/install.sh -o /tmp/claude-install.sh 2>/dev/null && bash /tmp/claude-install.sh >/dev/null 2>&1 </dev/null; then
-      have claude && ok "Claude Code" || { warn "installed but not on PATH — open a new terminal"; note_fail "claude on PATH"; }
+      # The installer drops the binary in ~/.local/bin (or ~/.claude/local) and
+      # edits an rc file — neither of which helps THIS shell. Telling the user
+      # to open a new terminal was not a cosmetic wart: phases 3 and 4 then find
+      # no `claude`, so the marketplace and every plugin are skipped, and the
+      # script completes "successfully" having installed nothing it exists to
+      # install. Only a fresh box shows this, because anywhere else claude is
+      # already on PATH.
+      adopt_path "$HOME/.local/bin" "$HOME/.claude/local" "$HOME/bin"
+      if have claude; then
+        ok "Claude Code ($(claude --version 2>/dev/null | head -1))"
+      else
+        bad "installed but not on PATH — the marketplace and plugin steps cannot run"
+        say "find it with:  ls ~/.local/bin/claude ~/.claude/local/claude 2>/dev/null"
+        note_fail "claude on PATH (re-run this script from a new terminal)"
+      fi
     else
       bad "could not install Claude Code"; note_fail "Claude Code"
     fi
   fi
+}
+
+# Put directories on PATH for THIS shell and for future ones.
+#
+# Every installer here writes somewhere that is not yet on PATH — nvm, pipx,
+# Claude Code, and the scanner binaries all do it — and each one edits an rc
+# file that the running script will never read. Without this the script installs
+# a tool and then cannot see it, one step later.
+adopt_path() {
+  local d
+  for d in "$@"; do
+    [ -d "$d" ] || continue
+    case ":$PATH:" in *":$d:"*) ;; *) PATH="$d:$PATH"; export PATH ;; esac
+    rc_ensure "case \":\$PATH:\" in *\":$d:\"*) ;; *) PATH=\"$d:\$PATH\" ;; esac" "# devhawk: $d on PATH"
+  done
 }
 
 phase_github() {
@@ -520,7 +549,7 @@ phase_plugins() {
             pipx ensurepath >/dev/null 2>&1 </dev/null || true
             # ensurepath only edits the rc file; this shell still needs it, or
             # the very next `have pipx` fails on a box that just installed it.
-            case ":$PATH:" in *":$HOME/.local/bin:"*) ;; *) PATH="$HOME/.local/bin:$PATH"; export PATH ;; esac
+            adopt_path "$HOME/.local/bin"
           else
             warn "could not install pipx — semgrep and pip-audit will be skipped"
           fi
@@ -529,7 +558,8 @@ phase_plugins() {
       # The binary scanners install into ~/.local/bin. Ubuntu's ~/.profile adds
       # that to PATH only if it EXISTS at login, and it may have just been
       # created — so a new shell would still not find trivy or osv-scanner.
-      rc_ensure 'case ":$PATH:" in *":$HOME/.local/bin:"*) ;; *) PATH="$HOME/.local/bin:$PATH" ;; esac' '# devhawk: ~/.local/bin on PATH'
+      mkdir -p "$HOME/.local/bin" 2>/dev/null
+      adopt_path "$HOME/.local/bin"
 
       local s; s="$(find "$HOME/.claude/plugins" -path '*audit-kit*' -name 'install-scanners.sh' -type f 2>/dev/null | head -1)"
       if [ -n "$s" ]; then
