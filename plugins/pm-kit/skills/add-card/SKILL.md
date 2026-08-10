@@ -3,7 +3,7 @@ name: add-card
 description: >
   REQUIRED for any single-card creation in an existing PM project — do NOT call
   PM MCP `create_task*` / `create_story` / `create_issue` directly; invoke this
-  so hygiene + audit attribution are applied. Creates one Asana/Shortcut/Linear
+  so hygiene + audit attribution are applied. Creates one Asana/Linear
   card in INBOX (unvalidated idea) or BACKLOG (validated), top-level with a
   Feature (the epic it supports), source attribution, standard fields, and a
   `devhawk:add-card` marker — never a subtask. Triggers on "add a
@@ -23,7 +23,7 @@ The canonical hygiene rules live in `${CLAUDE_PLUGIN_ROOT}/skills/_shared/asana-
 
 ## Step 1: Resolve the target project
 
-If the user names the project ("add a ticket to ELEVAT3 about X"), resolve it via the Asana MCP's `list_projects(scope="all")` and match by name — the default scope is only the projects you belong to, and a named board you are not a member of must still resolve (or `python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/asana_ops.py --list-projects`; Shortcut/Linear equivalents for those systems).
+If the user names the project ("add a ticket to ELEVAT3 about X"), resolve it via the Asana MCP's `list_projects(scope="all")` and match by name — the default scope is only the projects you belong to, and a named board you are not a member of must still resolve (or `python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/asana_ops.py --list-projects`; the Linear equivalent for that system).
 
 If the user is ambiguous ("add a ticket about X"), check `.devhawk-work.json` for the active project. If still unclear, ask: "Which project — ELEVAT3, Paryani Construction, …?"
 
@@ -53,8 +53,6 @@ Before any field validation or creation, **search the target project for likely 
 ### Searching
 
 For **Asana**: the Asana MCP's `search_tasks` against the resolved project with the proposed title's significant tokens (drop stopwords: a/the/and/of/to/for/on/in/with/is/are). Take top ~10 hits.
-
-For **Shortcut**: search the project's stories via MCP, same token approach. Filter to non-archived, non-completed stories.
 
 For **Linear**: search team issues via MCP, same token approach. Filter out completed/cancelled.
 
@@ -102,7 +100,7 @@ Always quote at least one specific signal in the reasoning — vague "looks simi
 
 **(a) Update existing card** — call into the same source-attribution machinery as Step 6:
 
-1. Append a comment on the existing card via the Asana MCP's `add_comment` (or Shortcut/Linear equivalent). Format:
+1. Append a comment on the existing card via the Asana MCP's `add_comment` (or the Linear equivalent). Format:
    ```
    [ADDITIONAL CONTEXT 2026-MM-DD from <source>]
    <the new context the user provided — a quote, a snippet, or the original ask verbatim>
@@ -150,8 +148,6 @@ For **Asana** (8 standard custom fields per `${CLAUDE_PLUGIN_ROOT}/skills/_share
 
 INBOX cards intentionally skip Priority / Type / Points / Release — these get filled in during the INBOX → BACKLOG promotion conversation, not before.
 
-For **Shortcut**: same logic, mapped to Shortcut primitives — workflow_state → Unscheduled (= BACKLOG), iteration → none unless committed, estimate, owner_ids (leave empty), story_type (feature/bug/chore), custom_fields[Priority].
-
 For **Linear**: state → Backlog, priority (default Medium=3), team selected.
 
 For **INBOX cards specifically**: skip Priority / Task Type / Story Points / Release / Sprint / Theme custom-field assignments. Only set Section=INBOX, the `Feature` if known, and the description (with Source line). Lighter creation matches the lighter pre-flight requirements.
@@ -167,7 +163,7 @@ Asana: `python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/asana_ops.py --create-task 
 Per `feedback_pm_source_attribution.md` and `asana-hygiene` Step 7 — **two-step rule, always**:
 
 1. Description includes a `Source: …` line at the bottom (per the format library in `asana-hygiene` Step 7).
-2. Post a comment on the new card via the Asana MCP's `add_comment` (plain text), or `python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/asana_ops.py --post-comment <gid> '<body>...</body>'` for rich HTML — quoting the specific source content. (Shortcut/Linear equivalents for those systems.)
+2. Post a comment on the new card via the Asana MCP's `add_comment` (plain text), or `python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/asana_ops.py --post-comment <gid> '<body>...</body>'` for rich HTML — quoting the specific source content. (The Linear equivalent for that system.)
 
 Even when the user says "I just thought of this" — record it: `Source: ad-hoc — user request 2026-04-27`. The trail's value is consistency, not just provenance. **For INBOX cards this rule is non-negotiable** — without source attribution, an INBOX item is just untraced noise.
 
@@ -182,7 +178,6 @@ Attach the well-known label `devhawk:add-card` to the new card. If the label/tag
 | System | How |
 |---|---|
 | **Asana** | Handled automatically by Step 5: `--create-task` stamps the tag when `audit_tag: true` (the default) — it ensures the workspace tag exists, then attaches it. To (re)create the tag standalone, run `python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/asana_ops.py --ensure-audit-tag` (idempotent; prints the gid). The curated MCP can attach an existing tag but cannot create workspace tags, which is why this lives in the script. Cache the gid in `.devhawk-work.json` for reuse. |
-| **Shortcut** | Label (workspace-level). Just include `labels: [{name: "devhawk:add-card", color: "#0E8A16"}]` on story creation — Shortcut auto-creates the label on first use and attaches an existing one by name afterward. No setup script needed. |
 | **Linear** | Issue label. Linear's MCP can create labels directly — call `linear.createIssueLabel({ name: "devhawk:add-card", color: "#0E8A16" })` if missing, then include the label id on creation. |
 
 ### Marker B — description footer (machine-parseable, survives label removal)
@@ -210,7 +205,7 @@ Format requirements:
 | Machine-parseable for audits | ✓ | ✓ (more structured) |
 | Carries version | ✗ | ✓ (`@v1`, `@v2`, …) |
 
-Use both. A skill-created card without either marker is a hygiene violation — `asana-hygiene` / `shortcut-hygiene` should flag it (future work — not in scope for this skill, but the marker format is stable enough to write a checker against).
+Use both. A skill-created card without either marker is a hygiene violation — `asana-hygiene` should flag it (future work — not in scope for this skill, but the marker format is stable enough to write a checker against).
 
 ### When the marker setup fails
 

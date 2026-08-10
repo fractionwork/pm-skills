@@ -678,12 +678,12 @@ phase_credentials() {
 
   # --- Every connector the factory supports, asked in one consistent pass.
   #
-  # This used to prompt for Asana and Shortcut only, on the reasoning that they
-  # are the two with a consumer on THIS machine. That reasoning is right about
-  # the plumbing and wrong about the person: `pm.tool` is asana | linear | ado,
-  # so a Linear shop was asked for two board tools it does not use and never for
-  # the one it does. An install that skips your board silently is indisput­ably
-  # worse than one that records a value the workstation does not itself read.
+  # This used to prompt for Asana only, on the reasoning that it is the one with
+  # a consumer on THIS machine. That reasoning is right about the plumbing and
+  # wrong about the person: `pm.tool` is asana | linear | ado, so a Linear shop
+  # was asked about a board tool it does not use and never about the one it
+  # does. An install that skips your board silently is worse than one that
+  # records a value the workstation does not itself read.
   #
   # The `reader` column is therefore stated out loud per credential rather than
   # used to decide which to ask about.
@@ -691,7 +691,6 @@ phase_credentials() {
   #   name|env var|who reads it|what it is
   local CONNECTORS='Linear|LINEAR_API_KEY|engine|personal API key from Linear > Settings > Security & access
 Azure DevOps|ADO_PAT|engine|PAT with Work Items (read/write) and Code (read/write)
-Shortcut|SHORTCUT_API_TOKEN|pm-kit, locally|API token from Shortcut > Settings > API Tokens
 Fireflies|FIREFLIES_API_KEY|engine|API key from Fireflies > Integrations, for meeting transcripts
 Slack bot token|SLACK_BOT_TOKEN|engine|Bot User OAuth Token, from Slack > your app > OAuth & Permissions
 Slack signing secret|SLACK_SIGNING_SECRET|engine|verifies inbound slash commands and interactions'

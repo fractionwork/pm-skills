@@ -149,7 +149,6 @@ a subtask can never flow INBOX → DONE.
 | "comment on card X", "@mention someone on the ticket" | `add-comment` |
 | "clean up the board", "audit the project", "enrich the backlog" | `asana-hygiene` |
 | "create an Asana project", "set up a board" | `asana-bootstrap` |
-| same, for Shortcut | `shortcut-hygiene` |
 
 The board standard these enforce — required admins, the 8 custom fields, the 8 sections, the
 flat-task model — is written down in `skills/_shared/asana-conventions.md`.

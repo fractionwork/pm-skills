@@ -33,7 +33,7 @@ Applies to every project-board operation, without being asked:
    tools, so this is enforced there rather than left to memory.
 
 2. **Mute bulk notifications.** Batches of 6+ card transitions mute notifications
-   (Asana `silent=true`, Linear `notifySubscribers: false`, Shortcut batch
+   (Asana `silent=true`, Linear `notifySubscribers: false`, batch
    endpoints); say that you muted. Single operations notify normally. For batches
    of ≤5, ask.
 

@@ -198,7 +198,7 @@ When more than one Asana surface is available, use them in this strict order:
 
    Tool names are namespaced by the plugin (`mcp__plugin_pm-kit_asana__<tool>`),
    so refer to them by bare name and resolve against whichever PM MCP is
-   connected — these skills also run against Shortcut and Linear.
+   connected — these skills also run against Linear.
 2. **`${CLAUDE_PLUGIN_ROOT}/skills/_shared/asana_ops.py`** — the privileged fallback, ONLY for operations the
    first-party MCP doesn't expose (see the structural list below) or when the MCP
    isn't connected. It self-authenticates (OAuth → refresh → `ASANA_PAT` /

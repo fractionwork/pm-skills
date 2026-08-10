@@ -1,7 +1,7 @@
 ---
 name: add-comment
 description: >
-  Post a comment on a PM card (Asana / Shortcut / Linear / Jira), converting
+  Post a comment on a PM card (Asana / Linear / Jira), converting
   Markdown or plain text into the format each system accepts — Asana's narrow
   HTML allowlist is validated before the call so you never hit a silent 400.
   Triggers on "comment on card X", "add a comment", "leave a note on the
@@ -21,7 +21,6 @@ If the user names the card by ID/permalink/URL, use it directly.
 
 If the user references it by description ("the approver dropdown ticket", "the bug Austin filed"), search the active project via the appropriate MCP:
 - **Asana**: the Asana MCP's `search_tasks` against the project, scored by title overlap
-- **Shortcut**: search via MCP, filter to non-archived
 - **Linear**: search team issues
 - **Jira**: search via Atlassian Rovo MCP with JQL
 
@@ -31,7 +30,6 @@ If multiple matches, list the top 5 with permalinks and ask which one. Don't gue
 
 Read the resolved card's URL to identify the system:
 - `app.asana.com` → Asana
-- `app.shortcut.com` → Shortcut
 - `linear.app` → Linear
 - `*.atlassian.net` → Jira
 
@@ -87,12 +85,12 @@ After conversion, **strip any tag not in the allowlist** — keep the inner text
 
 Final wrap: `<body>...</body>`. No leading/trailing whitespace outside the wrapper.
 
-### Shortcut, Linear — Markdown
+### Linear — Markdown
 
-Both accept GitHub-flavored Markdown directly. Pass the user's input through with two normalizations:
+Accepts GitHub-flavored Markdown directly. Pass the user's input through with two normalizations:
 
-1. **Mention syntax** — Shortcut uses `@<username>`; Linear uses `@<user-display-name>`. If the user wrote a name that doesn't match the platform's mention syntax, resolve via Step 4 and rewrite.
-2. **Code fences** — preserve language identifiers (`` ```ts ``); both render them.
+1. **Mention syntax** — Linear uses `@<user-display-name>`. If the user wrote a name in another form, resolve via Step 4 and rewrite.
+2. **Code fences** — preserve language identifiers (`` ```ts ``); Linear renders them.
 
 No HTML conversion needed.
 
@@ -110,9 +108,8 @@ If the MCP rejects wiki markup, the error will name ADF. Retry via ADF construct
 When the user writes `@<name>` in their input:
 
 1. **Asana** — resolve the user via `python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/asana_ops.py --find-user "<name>"` (matches name/email substring; prints `gid<TAB>name<TAB>email` per hit). Disambiguate by full name + email if multiple. Replace `@Jane` with `<a data-asana-gid="<user-gid>">@Jane</a>`. If no match, leave as plain text and warn the user. (User lookup isn't on the curated MCP, so it runs through the script — still first-party.)
-2. **Shortcut** — search members via MCP. Replace with `@<username>` (Shortcut uses usernames, not display names).
-3. **Linear** — search users via MCP. Replace with the form Linear's API expects (typically `@<display-name>`).
-4. **Jira** — Atlassian uses account IDs in mentions: `[~accountid:<id>]` for wiki markup, or the `mention` ADF node. Resolve via `mcp__claude_ai_Atlassian_Rovo__lookupJiraAccountId`.
+2. **Linear** — search users via MCP. Replace with the form Linear's API expects (typically `@<display-name>`).
+3. **Jira** — Atlassian uses account IDs in mentions: `[~accountid:<id>]` for wiki markup, or the `mention` ADF node. Resolve via `mcp__claude_ai_Atlassian_Rovo__lookupJiraAccountId`.
 
 Always show the user the resolved mention ("→ tagging Jane Smith <jane@example.com>") before posting if there was any ambiguity.
 
@@ -133,7 +130,7 @@ After conversion + allowlist strip, verify:
 
 If any check fails, **do not post**. Show the user what tripped the check and ask whether to strip + retry.
 
-### Shortcut, Linear
+### Linear
 
 No structured validation — the format is forgiving. Sanity-check: comment is not empty, mentions resolved.
 
@@ -146,7 +143,6 @@ If using wiki markup, no validation. If using ADF, verify the JSON shape matches
 | System | How |
 |---|---|
 | **Asana** | Prefer our first-party Asana MCP's `add_comment` (plain text). For rich HTML, or if that MCP isn't connected, fall back to `python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/asana_ops.py --post-comment <task_gid> '<html>'`. Never use other Asana MCPs (the official plugin / community / claude.ai connectors are superseded). |
-| **Shortcut** | MCP if available; else `POST /stories/<story_id>/comments` via `${CLAUDE_PLUGIN_ROOT}/skills/_shared/shortcut_ops.py --post-comment <story_id> '<markdown>'`. |
 | **Linear** | Linear MCP `createComment` with `body: <markdown>`. |
 | **Jira** | `mcp__claude_ai_Atlassian_Rovo__addCommentToJiraIssue` with the assembled body. |
 
@@ -174,7 +170,7 @@ Example confirmation:
 ## When NOT to use this skill
 
 - **Editing a card's description** — that's a card-edit operation, not a comment. Different MCP call, different validation surface.
-- **Project-wide status updates** — Asana has a separate `/project_statuses` endpoint; Shortcut has Workspace updates. Use the project-status flow.
+- **Project-wide status updates** — Asana has a separate `/project_statuses` endpoint. Use the project-status flow.
 - **Bulk commenting** (>5 cards) — loop this skill, but per `feedback_pm_bulk_notifications.md` mute notifications: Asana `silent=true`, Linear `notifySubscribers:false`. Don't blast the assignee/follower list.
 
 ## Reference

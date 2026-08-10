@@ -56,12 +56,11 @@ would be destroyed by the next `/plugin marketplace update`.
 | `add-comment` | Post a comment in the format each system accepts — Asana's narrow HTML allowlist is validated before the call, so no silent 400 |
 | `asana-bootstrap` | Stand up a new Asana project already compliant: admins, 8 custom fields, 8 sections, metadata, optional EPIC scaffold |
 | `asana-hygiene` | Audit an existing board and fix what can be fixed; report the rest |
-| `shortcut-hygiene` | The Shortcut equivalent |
 | `pm-setup` | Build the Python runtime and authenticate — run once after install |
 
 `skills/_shared/` (no `SKILL.md` — not itself a skill) holds the runtime the skills share:
-`asana_ops.py`, the `asana_mcp.py` server, `shortcut_ops.py`, the board
-conventions (`asana-conventions.md`, `shortcut-conventions.md`, `backlog-format.md`) and
+`asana_ops.py`, the `asana_mcp.py` server, the board
+conventions (`asana-conventions.md`, `backlog-format.md`) and
 `operating-rules.md`.
 
 ## Rules enforced in code, not just written down

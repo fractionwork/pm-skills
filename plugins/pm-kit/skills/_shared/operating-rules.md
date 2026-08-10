@@ -35,7 +35,7 @@ later would have had to retrace all of it by hand.
 
 **When.** Don't wait for a formal hygiene or enrichment run. Any time you're asked to "look at
 meetings / emails / the codebase to inform a PM change", this fires. Canonical implementations:
-`asana-hygiene` Step 7 and `shortcut-hygiene` Step 6.
+`asana-hygiene` Step 7.
 
 ---
 
@@ -48,8 +48,6 @@ followers within minutes, which is pure noise.
 - **Asana** — pass `silent=true` (or the `silent` query parameter, depending on endpoint) on the
   PUT/POST that triggers the change; `task` and `addTask` accept it. Verify against current API
   docs first: the field name has changed before.
-- **Shortcut** — batch endpoints don't notify by default; prefer `update_stories` over per-story
-  PUTs.
 - **Linear** — GraphQL `issueUpdate` accepts `notifySubscribers: false`.
 - **Single operations** (one card, one move) keep notifications **on**, so a real mention or
   assignment reaches the right person.
