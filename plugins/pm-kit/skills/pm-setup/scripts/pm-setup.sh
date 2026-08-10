@@ -61,8 +61,12 @@ say()  { printf '  %s\n' "$1"; }
 # The MCP SDK needs >= 3.10. Check the version rather than trusting `python3`:
 # several distros still ship 3.9 there, and the failure would otherwise appear
 # as an opaque syntax error deep inside the mcp package.
+# The explicit list is newest-first and must be EXTENDED as releases land: a
+# version missing from it is only found via the bare `python3` fallback, so a box
+# with python3.15 installed but `python3` still pointing at 3.9 would be reported
+# as having no usable interpreter while one sat right there.
 find_python() {
-  for c in python3.13 python3.12 python3.11 python3.10 python3 python; do
+  for c in python3.15 python3.14 python3.13 python3.12 python3.11 python3.10 python3 python; do
     command -v "$c" >/dev/null 2>&1 || continue
     if "$c" -c 'import sys; sys.exit(0 if sys.version_info >= (3,10) else 1)' 2>/dev/null; then
       echo "$c"; return 0
