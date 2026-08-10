@@ -557,6 +557,25 @@ phase_plugins() {
     fi
   done
 
+  # pm-kit's Python runtime. `--deps-only` builds the venv and exits BEFORE the
+  # authenticate step, which is the split that matters: the venv is a property
+  # of this MACHINE, and the Asana credential is a property of a PROJECT. The
+  # runtime belongs here with the other plugin runtimes; the credential belongs
+  # at onboarding with every other board credential.
+  case " $kits " in
+    *" pm-kit "*)
+      local ps; ps="$(find "$HOME/.claude/plugins" -path '*pm-kit*' -name 'pm-setup.sh' -type f 2>/dev/null | head -1)"
+      if [ -n "$ps" ]; then
+        if bash "$ps" --deps-only >/dev/null 2>&1 </dev/null; then
+          ok "pm-kit Python runtime"
+        else
+          warn "pm-kit's Python runtime did not build — run /pm-setup inside Claude Code"
+          note_fail "pm-kit runtime (re-run: $ps)"
+        fi
+      fi
+      ;;
+  esac
+
   # audit-kit's optional scanners. The installer ships INSIDE the plugin, so its
   # path is only knowable after the install above — and the plugin cache is
   # content-hash addressed, so it must be discovered rather than constructed.
@@ -654,28 +673,6 @@ phase_credentials() {
   step "5/5  Credentials — all optional"
   say "Everything below can be skipped. The kits are fully usable without any of it."
 
-  # --- Asana: delegate entirely to /pm-setup, which already does OAuth, guest
-  # --- PATs, a venv and a 0600 workspace.json. Reimplementing it here would be
-  # --- the start of the installer we deleted.
-  case " $(kits_for_role "$ROLE") " in
-    *" pm-kit "*)
-      local ps; ps="$(find "$HOME/.claude/plugins" -path '*pm-kit*' -name 'pm-setup.sh' -type f 2>/dev/null | head -1)"
-      if [ -n "$ps" ]; then
-        if [ "$ASSUME_YES" = "1" ]; then
-          say "Asana: run /pm-setup inside Claude Code (needs an interactive browser login)"
-        elif confirm "set up pm-kit's Python runtime and Asana access now?" no; then
-          bash "$ps" </dev/tty || note_fail "pm-setup (re-run: $ps)"
-        else
-          say "skipped — run /pm-setup inside Claude Code whenever you want it"
-        fi
-      else
-        say "Asana: run /pm-setup inside Claude Code once the plugins have loaded"
-      fi
-      ;;
-  esac
-
-  [ "$ASSUME_YES" = "1" ] && { say "skipping remaining prompts under --yes"; return 0; }
-
   # --- Board, channel and transcript credentials are NOT collected here.
   #
   # Not because they do not matter, but because this script is the wrong place
@@ -690,10 +687,13 @@ phase_credentials() {
   # and then PROVES it by listing board fields. Asking here meant offering a
   # Linear shop an Asana prompt and an ADO prompt it would never use.
   printf '\n'
-  say "Board, Slack and transcript credentials are NOT asked for here."
-  say "They belong to a project, not to this machine, and are collected during"
-  say "\`onboard\` — which knows which board the project actually uses and proves"
-  say "each credential by using it. Nothing is missing; it is asked later."
+  say "Board, Slack and transcript credentials — including Asana — are NOT asked"
+  say "for here. They belong to a project, not to this machine, and are collected"
+  say "during \`onboard\`, which knows which board the project actually uses and"
+  say "proves each credential by using it. Nothing is missing; it is asked later."
+  say ""
+  say "pm-kit's Python runtime was installed above; \`/pm-setup\` inside Claude Code"
+  say "signs it in to Asana whenever you want that."
 
   # --- The factory engine. OPTIONAL, and the wording matters: people read the
   # --- script's name and assume the engine is required. It is not.
