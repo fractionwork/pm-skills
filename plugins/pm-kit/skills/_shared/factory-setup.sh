@@ -282,6 +282,16 @@ report_state() {
 phase_prereqs() {
   step "1/5  Prerequisites"
 
+  # apt on Ubuntu 22.04+ can go INTERACTIVE mid-install even with -y: debconf
+  # raises config prompts, and `needrestart` opens a whiptail dialog asking which
+  # services to restart. Both read the terminal, and a script that is not the
+  # foreground process group takes SIGTTIN and stops. Neither fires on a machine
+  # where the packages are already present, which is why this never reproduces on
+  # a developer box and bites only a fresh distro.
+  export DEBIAN_FRONTEND=noninteractive
+  export NEEDRESTART_MODE=a
+  export NEEDRESTART_SUSPEND=1
+
   if [ "$PLATFORM" = "wsl" ] || [ "$PLATFORM" = "linux" ]; then
     if [ "$PLATFORM" = "wsl" ]; then
       local rel; rel="$(ubuntu_release)"
@@ -295,14 +305,14 @@ phase_prereqs() {
       fi
     fi
     if have apt-get; then
-      sudo apt-get update -qq 2>/dev/null
-      if sudo apt-get install -y -qq git curl python3-venv >/dev/null 2>&1; then
+      sudo apt-get update -qq 2>/dev/null </dev/null
+      if sudo apt-get install -y -qq git curl python3-venv >/dev/null 2>&1 </dev/null; then
         ok "base packages (git, curl, python3-venv)"
       else
         bad "could not install base packages"; note_fail "base packages"
       fi
       # wslview lets OAuth open a real browser instead of File Explorer. Optional.
-      [ "$PLATFORM" = "wsl" ] && { sudo apt-get install -y -qq wslu >/dev/null 2>&1 && ok "wslu (browser handoff)" || warn "wslu unavailable — links may not open"; }
+      [ "$PLATFORM" = "wsl" ] && { sudo apt-get install -y -qq wslu >/dev/null 2>&1 </dev/null && ok "wslu (browser handoff)" || warn "wslu unavailable — links may not open"; }
     fi
   elif [ "$PLATFORM" = "macos" ]; then
     have git || { warn "git missing — run: xcode-select --install"; note_fail "git (xcode-select --install)"; }
@@ -314,7 +324,7 @@ phase_prereqs() {
       warn "homebrew not installed — gh and python cannot be installed without it"
       if [ "$ASSUME_YES" != "1" ] && confirm "install Homebrew now?"; then
         if curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh -o /tmp/brew-install.sh 2>/dev/null &&
-           NONINTERACTIVE=1 bash /tmp/brew-install.sh >/dev/null 2>&1; then
+           NONINTERACTIVE=1 bash /tmp/brew-install.sh >/dev/null 2>&1 </dev/null; then
           # Apple silicon installs to /opt/homebrew, which is not on PATH until
           # shellenv runs; Intel uses /usr/local and usually already is.
           for p in /opt/homebrew/bin/brew /usr/local/bin/brew; do
@@ -331,7 +341,7 @@ phase_prereqs() {
     # macOS is the platform where python3 is genuinely in doubt.
     if find_python >/dev/null; then ok "python $( "$(find_python)" -V 2>&1 )"
     elif have brew; then
-      confirm "install python@3.12 via brew?" && { brew install python@3.12 >/dev/null 2>&1 && ok "python@3.12" || note_fail "python@3.12"; }
+      confirm "install python@3.12 via brew?" && { brew install python@3.12 >/dev/null 2>&1 </dev/null && ok "python@3.12" || note_fail "python@3.12"; }
     else warn "no python >= $PYTHON_MIN — pm-kit's Asana MCP will not run"; fi
   fi
 
@@ -351,7 +361,7 @@ phase_prereqs() {
     load_nvm
     if ! command -v nvm >/dev/null 2>&1 && ! type nvm >/dev/null 2>&1; then
       if curl -fsSL "https://raw.githubusercontent.com/nvm-sh/nvm/$NVM_VERSION/install.sh" -o /tmp/nvm-install.sh 2>/dev/null &&
-         bash /tmp/nvm-install.sh >/dev/null 2>&1; then
+         bash /tmp/nvm-install.sh >/dev/null 2>&1 </dev/null; then
         ok "nvm $NVM_VERSION"
       else
         bad "could not install nvm"; note_fail "nvm"
@@ -380,7 +390,7 @@ phase_prereqs() {
   if have claude; then
     ok "Claude Code ($(claude --version 2>/dev/null | head -1))"
   else
-    if curl -fsSL https://claude.ai/install.sh -o /tmp/claude-install.sh 2>/dev/null && bash /tmp/claude-install.sh >/dev/null 2>&1; then
+    if curl -fsSL https://claude.ai/install.sh -o /tmp/claude-install.sh 2>/dev/null && bash /tmp/claude-install.sh >/dev/null 2>&1 </dev/null; then
       have claude && ok "Claude Code" || { warn "installed but not on PATH — open a new terminal"; note_fail "claude on PATH"; }
     else
       bad "could not install Claude Code"; note_fail "Claude Code"
@@ -399,7 +409,7 @@ phase_github() {
 
   if ! have gh; then
     if [ "$PLATFORM" = "macos" ] && have brew; then
-      brew install gh >/dev/null 2>&1 && ok "gh" || { bad "could not install gh"; note_fail "gh"; return 1; }
+      brew install gh >/dev/null 2>&1 </dev/null && ok "gh" || { bad "could not install gh"; note_fail "gh"; return 1; }
     elif have apt-get; then
       # GitHub's own apt repo — Ubuntu's copy lags well behind.
       sudo mkdir -p -m 755 /etc/apt/keyrings 2>/dev/null
@@ -408,9 +418,9 @@ phase_github() {
         sudo chmod go+r /etc/apt/keyrings/githubcli-archive-keyring.gpg
         echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" \
           | sudo tee /etc/apt/sources.list.d/github-cli.list >/dev/null
-        sudo apt-get update -qq 2>/dev/null
+        sudo apt-get update -qq 2>/dev/null </dev/null
       fi
-      sudo apt-get install -y -qq gh >/dev/null 2>&1 && ok "gh" || { bad "could not install gh"; note_fail "gh"; return 1; }
+      sudo apt-get install -y -qq gh >/dev/null 2>&1 </dev/null && ok "gh" || { bad "could not install gh"; note_fail "gh"; return 1; }
     else
       bad "no package manager to install gh with"; note_fail "gh"; return 1
     fi
