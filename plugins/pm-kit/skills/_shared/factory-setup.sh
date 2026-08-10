@@ -107,7 +107,12 @@ confirm() {
 # arriving on stdin is far more likely to be the next line of a script than a
 # token a human meant to type.
 read_secret() {
-  [ -t 0 ] || { echo ""; return 1; }
+  # Guard on /dev/tty, NOT on stdin. The requirement is "a human is at a
+  # terminal", and `[ -t 0 ]` only approximates that: it is false whenever stdin
+  # is redirected, which includes `curl | bash` and — the case that actually bit
+  # — the inside of a `while read` loop fed by a heredoc. There the prompt was
+  # skipped silently and the credential was never recorded, with no error.
+  [ -r /dev/tty ] || { echo ""; return 1; }
   printf '  %s: ' "$1" >&2
   local v=""
   read -r -s v </dev/tty 2>/dev/null || { echo ""; return 1; }
@@ -671,11 +676,70 @@ phase_credentials() {
 
   [ "$ASSUME_YES" = "1" ] && { say "skipping remaining prompts under --yes"; return 0; }
 
-  # --- Shortcut: a plain token, and pm-kit reads it directly.
-  if confirm "record a Shortcut API token?" no; then
-    local t; t="$(read_secret 'SHORTCUT_API_TOKEN')"
-    [ -n "$t" ] && { save_secret SHORTCUT_API_TOKEN "$t"; ok "saved to $ENV_FILE (0600)"; } || warn "nothing entered — skipped"
-  fi
+  # --- Every connector the factory supports, asked in one consistent pass.
+  #
+  # This used to prompt for Asana and Shortcut only, on the reasoning that they
+  # are the two with a consumer on THIS machine. That reasoning is right about
+  # the plumbing and wrong about the person: `pm.tool` is asana | linear | ado,
+  # so a Linear shop was asked for two board tools it does not use and never for
+  # the one it does. An install that skips your board silently is indisput­ably
+  # worse than one that records a value the workstation does not itself read.
+  #
+  # The `reader` column is therefore stated out loud per credential rather than
+  # used to decide which to ask about.
+  #
+  #   name|env var|who reads it|what it is
+  local CONNECTORS='Linear|LINEAR_API_KEY|engine|personal API key from Linear > Settings > Security & access
+Azure DevOps|ADO_PAT|engine|PAT with Work Items (read/write) and Code (read/write)
+Shortcut|SHORTCUT_API_TOKEN|pm-kit, locally|API token from Shortcut > Settings > API Tokens
+Fireflies|FIREFLIES_API_KEY|engine|API key from Fireflies > Integrations, for meeting transcripts
+Slack bot token|SLACK_BOT_TOKEN|engine|Bot User OAuth Token, from Slack > your app > OAuth & Permissions
+Slack signing secret|SLACK_SIGNING_SECRET|engine|verifies inbound slash commands and interactions'
+
+  printf '\n'
+  say "Connector credentials. Each is optional and asked separately."
+  say "\"engine\" means the value is read by the factory service, not by this"
+  say "machine — recorded here so you have one place for them, then handed to"
+  say "whoever administers the engine. \"locally\" means a plugin reads it here."
+
+  # Iterate without redirecting the loop's stdin. `while read ... done <<EOF`
+  # would replace stdin for every command in the body, which is what broke the
+  # secret prompt above.
+  local line label var reader help t saved_ifs
+  saved_ifs="$IFS"
+  IFS='
+'
+  for line in $CONNECTORS; do
+    IFS="$saved_ifs"
+    label="${line%%|*}";      line="${line#*|}"
+    var="${line%%|*}";        line="${line#*|}"
+    reader="${line%%|*}";     help="${line#*|}"
+    [ -n "$label" ] || continue
+    printf '\n'
+    say "$label — read by $reader"
+    say "  $help"
+    if confirm "record $var?" no; then
+      t="$(read_secret "$var")"
+      if [ -n "$t" ]; then
+        save_secret "$var" "$t"
+        ok "saved $var to $ENV_FILE (0600)"
+        [ "$reader" = "engine" ] && say "  the ENGINE also needs this in its deploy env — hand it to the operator"
+      else
+        warn "nothing entered — skipped"
+      fi
+    fi
+    IFS='
+'
+  done
+  IFS="$saved_ifs"
+
+  # --- Microsoft Teams. Asked about explicitly, because "it was never mentioned"
+  # --- is indistinguishable from "we forgot".
+  printf '\n'
+  say "Microsoft Teams — nothing to record yet."
+  say "  The Teams connector exists but its Graph authentication is not built"
+  say "  (no client id / secret / tenant is read anywhere), so there is no"
+  say "  credential to collect. Skipped deliberately, not overlooked."
 
   # --- The factory engine. OPTIONAL, and the wording matters: people read the
   # --- script's name and assume the engine is required. It is not.
@@ -683,7 +747,7 @@ phase_credentials() {
   say "The factory engine is a separate service. If you do not use one, skip this —"
   say "every kit works without it, and no skill will mention it."
   if confirm "connect this machine to a factory engine?" no; then
-    local t; t="$(read_secret 'FACTORY_API_TOKEN')"
+    t="$(read_secret 'FACTORY_API_TOKEN')"
     if [ -n "$t" ]; then
       save_secret FACTORY_API_TOKEN "$t"
       ok "saved to $ENV_FILE (0600)"
@@ -696,16 +760,6 @@ phase_credentials() {
   else
     say "skipped — nothing here depends on it"
   fi
-
-  # Name what is deliberately absent. Without this the script simply never
-  # mentions Linear, ADO, Fireflies, Teams or Slack, which reads as an
-  # oversight rather than a boundary — and someone then goes looking for the
-  # prompt that was never going to come.
-  printf '\n'
-  say "NOT handled here: Linear · Azure DevOps · Fireflies · Teams · Slack."
-  say "Those are read by the ENGINE, not by anything on this machine, and live"
-  say "in its deploy env. A copy here would be a secret nothing loads. Ask"
-  say "whoever runs the engine to set them."
 }
 
 # ── main ────────────────────────────────────────────────────────────────────
