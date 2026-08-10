@@ -126,11 +126,37 @@ load_nvm() {
   [ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh" >/dev/null 2>&1
 }
 
-# The version that MATTERS is the one a fresh login shell resolves, because that
-# is what Claude Code and the kits' .mjs scripts get. A node that works only in
-# the installing terminal is the single most common way this setup half-works.
+# The version that MATTERS is the one a NEW shell resolves, because that is what
+# Claude Code and the kits' .mjs scripts get. A node that works only in the
+# installing terminal is the most common way this setup half-works.
+#
+# Probing that correctly is fiddlier than it looks, and getting it wrong is a
+# macOS-only false negative:
+#
+#   - macOS defaults to zsh, so nvm appends to ~/.zshrc. `bash -lc` reads
+#     ~/.bash_profile / ~/.profile and would never see it — the script would
+#     report "no node" on a machine where node works perfectly.
+#   - `zsh -lc` does not help: .zshrc is sourced for INTERACTIVE shells only, so
+#     a login-but-not-interactive zsh misses it too.
+#
+# So try the user's own shell first, interactive AND login, and fall back
+# through the other plausible combinations. Any hit means a real session will
+# find node; no hit across all four means none will.
 login_node_version() {
-  bash -lc 'command -v node >/dev/null 2>&1 && node -v' 2>/dev/null | tr -d '\r'
+  local sh candidates c v
+  sh="${SHELL:-/bin/bash}"
+  candidates="$sh:-lic $sh:-lc /bin/bash:-lic /bin/bash:-lc"
+  for c in $candidates; do
+    local bin="${c%%:*}" flag="${c##*:}"
+    [ -x "$bin" ] || continue
+    # `-i` makes some shells emit job-control noise on a non-tty; discard it and
+    # keep only a line that actually looks like a version.
+    v="$("$bin" "$flag" 'command -v node >/dev/null 2>&1 && node -v' 2>/dev/null \
+          | tr -d '\r' | grep -E '^v?[0-9]+\.' | head -1)"
+    [ -n "$v" ] && { echo "$v"; return 0; }
+  done
+  echo ""
+  return 1
 }
 
 node_major() { echo "${1#v}" | cut -d. -f1; }
@@ -269,7 +295,28 @@ phase_prereqs() {
     fi
   elif [ "$PLATFORM" = "macos" ]; then
     have git || { warn "git missing — run: xcode-select --install"; note_fail "git (xcode-select --install)"; }
-    if have brew; then ok "homebrew"; else warn "homebrew not installed — see https://brew.sh"; fi
+    if have brew; then
+      ok "homebrew"
+    else
+      # Warning and continuing used to dead-end later: phase_github has no way
+      # to install gh without it and fails with "no package manager".
+      warn "homebrew not installed — gh and python cannot be installed without it"
+      if [ "$ASSUME_YES" != "1" ] && confirm "install Homebrew now?"; then
+        if curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh -o /tmp/brew-install.sh 2>/dev/null &&
+           NONINTERACTIVE=1 bash /tmp/brew-install.sh >/dev/null 2>&1; then
+          # Apple silicon installs to /opt/homebrew, which is not on PATH until
+          # shellenv runs; Intel uses /usr/local and usually already is.
+          for p in /opt/homebrew/bin/brew /usr/local/bin/brew; do
+            [ -x "$p" ] && eval "$("$p" shellenv)" && break
+          done
+          have brew && ok "homebrew" || { bad "installed but not on PATH"; note_fail "homebrew on PATH"; }
+        else
+          bad "could not install Homebrew"; note_fail "homebrew (see https://brew.sh)"
+        fi
+      else
+        note_fail "homebrew (see https://brew.sh)"
+      fi
+    fi
     # macOS is the platform where python3 is genuinely in doubt.
     if find_python >/dev/null; then ok "python $( "$(find_python)" -V 2>&1 )"
     elif have brew; then
@@ -283,6 +330,13 @@ phase_prereqs() {
   else
     local cur; cur="$(login_node_version)"
     [ -n "$cur" ] && say "found node $cur — below the $NODE_MAJOR floor, installing via nvm"
+    # Make sure the rc file exists BEFORE nvm runs. nvm's installer appends to a
+    # profile it detects, and when it finds none it prints "Profile not found"
+    # and appends nothing — leaving node absent from every future shell. A fresh
+    # macOS account with no ~/.zshrc hits this exactly.
+    local rc; rc="$(primary_rc)"
+    [ -f "$rc" ] || { touch "$rc" 2>/dev/null && say "created $rc for nvm to write to"; }
+
     load_nvm
     if ! command -v nvm >/dev/null 2>&1 && ! type nvm >/dev/null 2>&1; then
       if curl -fsSL "https://raw.githubusercontent.com/nvm-sh/nvm/$NVM_VERSION/install.sh" -o /tmp/nvm-install.sh 2>/dev/null &&
@@ -446,10 +500,34 @@ phase_plugins() {
   esac
 }
 
-# Append a line to a shell rc exactly once, keyed by a marker.
+# The rc file the user's OWN shell will actually read on a new session.
+#
+# Not a cosmetic choice. On macOS the default shell is zsh and a fresh account
+# frequently has no ~/.zshrc at all; on Linux it is bash and ~/.bashrc. Picking
+# the wrong one — or skipping because the file is absent — writes credentials
+# that are never loaded.
+#
+# macOS bash is the subtle case: Terminal starts LOGIN shells, which read
+# ~/.bash_profile and never ~/.bashrc.
+primary_rc() {
+  case "$(basename "${SHELL:-/bin/bash}")" in
+    zsh)  echo "${ZDOTDIR:-$HOME}/.zshrc" ;;
+    bash) if [ "$PLATFORM" = "macos" ]; then echo "$HOME/.bash_profile"; else echo "$HOME/.bashrc"; fi ;;
+    *)    echo "$HOME/.profile" ;;
+  esac
+}
+
+# Append a line to the shell rc exactly once, keyed by a marker.
+#
+# CREATES the primary rc if it is missing. The previous version skipped absent
+# files, which on a fresh Mac (no ~/.zshrc) meant the credential file was
+# written and the line that loads it never was — a 0600 file that looks like
+# working configuration and is read by nothing.
 rc_ensure() {
-  local line="$1" marker="$2" rc
-  for rc in "$HOME/.bashrc" "$HOME/.zshrc"; do
+  local line="$1" marker="$2" rc primary
+  primary="$(primary_rc)"
+  [ -f "$primary" ] || { touch "$primary" 2>/dev/null && say "created $primary"; }
+  for rc in "$primary" "$HOME/.bashrc" "$HOME/.zshrc" "$HOME/.bash_profile"; do
     [ -f "$rc" ] || continue
     grep -qF "$marker" "$rc" 2>/dev/null && continue
     printf '\n%s\n%s\n' "$marker" "$line" >> "$rc"
