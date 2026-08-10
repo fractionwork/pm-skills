@@ -261,6 +261,10 @@ One line, not a lecture:
 > `factory:` this project gates intake on **Release = July Release**. This card
 > has no Release set, so the factory will not pick it up. Want me to set it?
 
+**If the call fails or hangs, drop it silently.** The card is already created and
+correct — that was the job. A factory that is down, unreachable or not configured
+must never turn a successful `add-card` into something that looks failed.
+
 ## Project hygiene assumptions
 
 This skill is the **card-level enforcement layer**. It assumes the project itself is already healthy — specifically:

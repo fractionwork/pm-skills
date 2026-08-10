@@ -8,6 +8,32 @@ skill points you here; the rules are the same everywhere.
 **The factory ADVISES. The human decides. A repo that is not registered behaves
 exactly as it did before the factory existed.**
 
+## Can I use these skills without the factory?
+
+**Yes. All of them, completely.** Of 34 skills across the four plugins, exactly
+four consult the factory at all — `next-task`, `card-done`, `feature-build` and
+`add-card` — and in every one of them it is an ADDITIONAL step at the end, never
+a precondition. The other thirty never mention it.
+
+The one exception is `onboard`, whose entire job is registering a project with
+the factory. It says so up front and stops early if the factory is unreachable,
+rather than failing four phases in.
+
+There are three ways "no factory" happens, and they are NOT the same:
+
+| | what you see | what to do |
+|---|---|---|
+| **Not configured** — no `mcp__factory__*` tools | nothing | say nothing; this user never asked for a factory |
+| **Configured but the repo is not registered** | tools work, no match in `list_projects` | continue as before; do not mention the factory |
+| **Configured but the engine is DOWN** | the tool call errors or hangs | one line that it was unreachable, then carry on |
+
+The third is the one worth being deliberate about, because it is the only one
+where something visibly went wrong. **Never retry, never wait.** A connection to
+a dead host fails instantly, but an unreachable one can hang until a timeout —
+and a human watching their build stall because a reporting call is blocked would
+rightly stop using the skill. Every factory call is the LAST thing in its step
+for exactly this reason: whatever it was, the real work is already done.
+
 ## How to tell whether this repo is a factory project
 
 ```bash
