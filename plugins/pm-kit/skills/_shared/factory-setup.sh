@@ -74,12 +74,33 @@ step() { printf '\n\033[1m%s\033[0m\n' "$1"; }
 note_fail() { FAILED="$FAILED$1"$'\n'; }
 have() { command -v "$1" >/dev/null 2>&1; }
 
-# Ask, unless --yes. Default is YES so a bare Enter keeps things moving.
+# Ask. Second argument is the default when the human just presses Enter:
+# `yes` (the default) for "shall I install this", `no` for anything that
+# records a credential.
+#
+# Credential prompts default to NO deliberately. They are optional extras, and
+# the old single-mode `[Y/n]` meant Enter — or any answer the case did not
+# recognise — opted you IN to being asked for a secret you had just been told
+# was optional. Reported from a real run: "I said no to shortcut, still asked
+# for an api key."
+#
+# A read that FAILS also answers no now. It used to `return 0`, so losing the
+# terminal was indistinguishable from consent — the worst possible direction for
+# a prompt whose next step is "type your token".
 confirm() {
-  [ "$ASSUME_YES" = "1" ] && return 0
-  printf '  %s [Y/n] ' "$1"
-  read -r reply </dev/tty 2>/dev/null || return 0
-  case "$reply" in [Nn]*) return 1 ;; *) return 0 ;; esac
+  local prompt="$1" default="${2:-yes}" reply=""
+  [ "$ASSUME_YES" = "1" ] && { [ "$default" = "yes" ] && return 0 || return 1; }
+  if [ "$default" = "yes" ]; then printf '  %s [Y/n] ' "$prompt"
+  else printf '  %s [y/N] ' "$prompt"; fi
+  read -r reply </dev/tty 2>/dev/null || { printf '\n'; return 1; }
+  reply="$(printf '%s' "$reply" | tr -d '[:space:]')"
+  case "$reply" in
+    [Yy]*) return 0 ;;
+    [Nn]*) return 1 ;;
+    '')    [ "$default" = "yes" ] && return 0 || return 1 ;;
+    # Anything else is NOT consent. Say so rather than guessing.
+    *)     say "not understood — taking that as no"; return 1 ;;
+  esac
 }
 
 # Read a secret without echoing it, and never accept one from a pipe — a value
@@ -637,7 +658,7 @@ phase_credentials() {
       if [ -n "$ps" ]; then
         if [ "$ASSUME_YES" = "1" ]; then
           say "Asana: run /pm-setup inside Claude Code (needs an interactive browser login)"
-        elif confirm "set up pm-kit's Python runtime and Asana access now?"; then
+        elif confirm "set up pm-kit's Python runtime and Asana access now?" no; then
           bash "$ps" </dev/tty || note_fail "pm-setup (re-run: $ps)"
         else
           say "skipped — run /pm-setup inside Claude Code whenever you want it"
@@ -651,7 +672,7 @@ phase_credentials() {
   [ "$ASSUME_YES" = "1" ] && { say "skipping remaining prompts under --yes"; return 0; }
 
   # --- Shortcut: a plain token, and pm-kit reads it directly.
-  if confirm "record a Shortcut API token?"; then
+  if confirm "record a Shortcut API token?" no; then
     local t; t="$(read_secret 'SHORTCUT_API_TOKEN')"
     [ -n "$t" ] && { save_secret SHORTCUT_API_TOKEN "$t"; ok "saved to $ENV_FILE (0600)"; } || warn "nothing entered — skipped"
   fi
@@ -661,7 +682,7 @@ phase_credentials() {
   printf '\n'
   say "The factory engine is a separate service. If you do not use one, skip this —"
   say "every kit works without it, and no skill will mention it."
-  if confirm "connect this machine to a factory engine?"; then
+  if confirm "connect this machine to a factory engine?" no; then
     local t; t="$(read_secret 'FACTORY_API_TOKEN')"
     if [ -n "$t" ]; then
       save_secret FACTORY_API_TOKEN "$t"
@@ -675,6 +696,16 @@ phase_credentials() {
   else
     say "skipped — nothing here depends on it"
   fi
+
+  # Name what is deliberately absent. Without this the script simply never
+  # mentions Linear, ADO, Fireflies, Teams or Slack, which reads as an
+  # oversight rather than a boundary — and someone then goes looking for the
+  # prompt that was never going to come.
+  printf '\n'
+  say "NOT handled here: Linear · Azure DevOps · Fireflies · Teams · Slack."
+  say "Those are read by the ENGINE, not by anything on this machine, and live"
+  say "in its deploy env. A copy here would be a secret nothing loads. Ask"
+  say "whoever runs the engine to set them."
 }
 
 # ── main ────────────────────────────────────────────────────────────────────
