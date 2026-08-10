@@ -676,69 +676,24 @@ phase_credentials() {
 
   [ "$ASSUME_YES" = "1" ] && { say "skipping remaining prompts under --yes"; return 0; }
 
-  # --- Every connector the factory supports, asked in one consistent pass.
+  # --- Board, channel and transcript credentials are NOT collected here.
   #
-  # This used to prompt for Asana only, on the reasoning that it is the one with
-  # a consumer on THIS machine. That reasoning is right about the plumbing and
-  # wrong about the person: `pm.tool` is asana | linear | ado, so a Linear shop
-  # was asked about a board tool it does not use and never about the one it
-  # does. An install that skips your board silently is worse than one that
-  # records a value the workstation does not itself read.
+  # Not because they do not matter, but because this script is the wrong place
+  # to ask. It runs once per MACHINE; those credentials belong to a PROJECT. At
+  # install time nobody knows which project this machine will work on, one
+  # machine often serves several with different boards, and the values are read
+  # by the ENGINE rather than by anything here — so a copy made now is a copy
+  # somebody has to move by hand later.
   #
-  # The `reader` column is therefore stated out loud per credential rather than
-  # used to decide which to ask about.
-  #
-  #   name|env var|who reads it|what it is
-  local CONNECTORS='Linear|LINEAR_API_KEY|engine|personal API key from Linear > Settings > Security & access
-Azure DevOps|ADO_PAT|engine|PAT with Work Items (read/write) and Code (read/write)
-Fireflies|FIREFLIES_API_KEY|engine|API key from Fireflies > Integrations, for meeting transcripts
-Slack bot token|SLACK_BOT_TOKEN|engine|Bot User OAuth Token, from Slack > your app > OAuth & Permissions
-Slack signing secret|SLACK_SIGNING_SECRET|engine|verifies inbound slash commands and interactions'
-
+  # `onboard` asks instead, and asks better: it already knows the project's
+  # `pm.tool`, so it requests exactly the one board credential that project uses
+  # and then PROVES it by listing board fields. Asking here meant offering a
+  # Linear shop an Asana prompt and an ADO prompt it would never use.
   printf '\n'
-  say "Connector credentials. Each is optional and asked separately."
-  say "\"engine\" means the value is read by the factory service, not by this"
-  say "machine — recorded here so you have one place for them, then handed to"
-  say "whoever administers the engine. \"locally\" means a plugin reads it here."
-
-  # Iterate without redirecting the loop's stdin. `while read ... done <<EOF`
-  # would replace stdin for every command in the body, which is what broke the
-  # secret prompt above.
-  local line label var reader help t saved_ifs
-  saved_ifs="$IFS"
-  IFS='
-'
-  for line in $CONNECTORS; do
-    IFS="$saved_ifs"
-    label="${line%%|*}";      line="${line#*|}"
-    var="${line%%|*}";        line="${line#*|}"
-    reader="${line%%|*}";     help="${line#*|}"
-    [ -n "$label" ] || continue
-    printf '\n'
-    say "$label — read by $reader"
-    say "  $help"
-    if confirm "record $var?" no; then
-      t="$(read_secret "$var")"
-      if [ -n "$t" ]; then
-        save_secret "$var" "$t"
-        ok "saved $var to $ENV_FILE (0600)"
-        [ "$reader" = "engine" ] && say "  the ENGINE also needs this in its deploy env — hand it to the operator"
-      else
-        warn "nothing entered — skipped"
-      fi
-    fi
-    IFS='
-'
-  done
-  IFS="$saved_ifs"
-
-  # --- Microsoft Teams. Asked about explicitly, because "it was never mentioned"
-  # --- is indistinguishable from "we forgot".
-  printf '\n'
-  say "Microsoft Teams — nothing to record yet."
-  say "  The Teams connector exists but its Graph authentication is not built"
-  say "  (no client id / secret / tenant is read anywhere), so there is no"
-  say "  credential to collect. Skipped deliberately, not overlooked."
+  say "Board, Slack and transcript credentials are NOT asked for here."
+  say "They belong to a project, not to this machine, and are collected during"
+  say "\`onboard\` — which knows which board the project actually uses and proves"
+  say "each credential by using it. Nothing is missing; it is asked later."
 
   # --- The factory engine. OPTIONAL, and the wording matters: people read the
   # --- script's name and assume the engine is required. It is not.
