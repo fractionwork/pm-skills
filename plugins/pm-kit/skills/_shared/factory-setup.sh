@@ -507,6 +507,30 @@ phase_plugins() {
   # content-hash addressed, so it must be discovered rather than constructed.
   case " $kits " in
     *" audit-kit "*)
+      # Two of the five scanners — semgrep and pip-audit — are Python CLIs, and
+      # install-scanners.sh needs pipx or Homebrew to place them. A fresh Ubuntu
+      # has neither, and since 24.04 is PEP 668 "externally managed" the
+      # `pip3 --user` fallback is blocked too, so both fail with "no installer
+      # for <tool>" while the three binary scanners succeed. Provide pipx here
+      # rather than let two of five silently drop.
+      if ! have pipx && ! have brew; then
+        if have apt-get; then
+          if sudo apt-get install -y -qq pipx >/dev/null 2>&1 </dev/null; then
+            ok "pipx (for the Python scanners)"
+            pipx ensurepath >/dev/null 2>&1 </dev/null || true
+            # ensurepath only edits the rc file; this shell still needs it, or
+            # the very next `have pipx` fails on a box that just installed it.
+            case ":$PATH:" in *":$HOME/.local/bin:"*) ;; *) PATH="$HOME/.local/bin:$PATH"; export PATH ;; esac
+          else
+            warn "could not install pipx — semgrep and pip-audit will be skipped"
+          fi
+        fi
+      fi
+      # The binary scanners install into ~/.local/bin. Ubuntu's ~/.profile adds
+      # that to PATH only if it EXISTS at login, and it may have just been
+      # created — so a new shell would still not find trivy or osv-scanner.
+      rc_ensure 'case ":$PATH:" in *":$HOME/.local/bin:"*) ;; *) PATH="$HOME/.local/bin:$PATH" ;; esac' '# devhawk: ~/.local/bin on PATH'
+
       local s; s="$(find "$HOME/.claude/plugins" -path '*audit-kit*' -name 'install-scanners.sh' -type f 2>/dev/null | head -1)"
       if [ -n "$s" ]; then
         if [ "$ASSUME_YES" = "1" ] || confirm "install audit-kit's scanners (semgrep, gitleaks, trivy, osv-scanner, pip-audit)?"; then
