@@ -130,30 +130,41 @@ load_nvm() {
 # Claude Code and the kits' .mjs scripts get. A node that works only in the
 # installing terminal is the most common way this setup half-works.
 #
-# Probing that correctly is fiddlier than it looks, and getting it wrong is a
-# macOS-only false negative:
+# NEVER USE AN INTERACTIVE SHELL (`-i`) TO PROBE THIS. It looks like the obvious
+# way to pick up an rc file, and it SUSPENDS THIS SCRIPT: an interactive shell
+# sets up job control and reaches for the terminal's foreground process group,
+# so the caller takes SIGTTIN/SIGTTOU and stops dead with `[1]+ Stopped`. It
+# happened here, on WSL, immediately after a sudo prompt. A version check must
+# not be able to halt the installer.
 #
-#   - macOS defaults to zsh, so nvm appends to ~/.zshrc. `bash -lc` reads
-#     ~/.bash_profile / ~/.profile and would never see it — the script would
-#     report "no node" on a machine where node works perfectly.
-#   - `zsh -lc` does not help: .zshrc is sourced for INTERACTIVE shells only, so
-#     a login-but-not-interactive zsh misses it too.
+# The problem `-i` was reaching for is real, though: macOS defaults to zsh, nvm
+# appends to ~/.zshrc, and neither `bash -lc` (reads ~/.bash_profile) nor
+# `zsh -lc` (does not read .zshrc — that file is for interactive shells) would
+# ever see it.
 #
-# So try the user's own shell first, interactive AND login, and fall back
-# through the other plausible combinations. Any hit means a real session will
-# find node; no hit across all four means none will.
+# The fix is to source what we want EXPLICITLY in a non-interactive shell, and
+# to ask nvm directly rather than inferring it from a login shell's behaviour:
+#
+#   1. plain login shell         — covers a system node on PATH
+#   2. rc file, sourced by hand  — covers nvm written into .zshrc / .bashrc
+#   3. nvm.sh, sourced directly  — covers it regardless of any rc file at all
+#
+# Every probe gets `</dev/null` so nothing can block on terminal input.
 login_node_version() {
-  local sh candidates c v
+  local sh rc v probe bin
   sh="${SHELL:-/bin/bash}"
-  candidates="$sh:-lic $sh:-lc /bin/bash:-lic /bin/bash:-lc"
-  for c in $candidates; do
-    local bin="${c%%:*}" flag="${c##*:}"
-    [ -x "$bin" ] || continue
-    # `-i` makes some shells emit job-control noise on a non-tty; discard it and
-    # keep only a line that actually looks like a version.
-    v="$("$bin" "$flag" 'command -v node >/dev/null 2>&1 && node -v' 2>/dev/null \
-          | tr -d '\r' | grep -E '^v?[0-9]+\.' | head -1)"
-    [ -n "$v" ] && { echo "$v"; return 0; }
+  rc="$(primary_rc)"
+
+  for probe in \
+    'command -v node >/dev/null 2>&1 && node -v' \
+    "[ -r '$rc' ] && . '$rc' >/dev/null 2>&1; command -v node >/dev/null 2>&1 && node -v" \
+    'export NVM_DIR="${NVM_DIR:-$HOME/.nvm}"; [ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh" >/dev/null 2>&1; command -v node >/dev/null 2>&1 && node -v'
+  do
+    for bin in "$sh" /bin/bash; do
+      [ -x "$bin" ] || continue
+      v="$("$bin" -c "$probe" </dev/null 2>/dev/null | tr -d '\r' | grep -E '^v?[0-9]+\.' | head -1)"
+      [ -n "$v" ] && { echo "$v"; return 0; }
+    done
   done
   echo ""
   return 1
