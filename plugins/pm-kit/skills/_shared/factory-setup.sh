@@ -736,13 +736,22 @@ phase_credentials() {
   # and then PROVES it by listing board fields. Asking here meant offering a
   # Linear shop an Asana prompt and an ADO prompt it would never use.
   printf '\n'
-  say "Board, Slack and transcript credentials — including Asana — are NOT asked"
-  say "for here. They belong to a project, not to this machine, and are collected"
-  say "during \`onboard\`, which knows which board the project actually uses and"
-  say "proves each credential by using it. Nothing is missing; it is asked later."
-  say ""
-  say "pm-kit's Python runtime was installed above; \`/pm-setup\` inside Claude Code"
-  say "signs it in to Asana whenever you want that."
+  # Two different destinations, and conflating them told a pm-kit-only user to
+  # wait for a prompt that was never coming: `onboard` ships in devhawk-kit, so
+  # a PM who installed pm-kit alone will never run it. Lead with the one that
+  # applies to everybody.
+  say "To drive an Asana board from here, run \`/pm-setup\` inside Claude Code."
+  say "The runtime is already installed above; that signs it in. It is the only"
+  say "step left for board work on this machine."
+  case " $(kits_for_role "$ROLE") " in
+    *" devhawk-kit "*)
+      say ""
+      say "Credentials the ENGINE reads — Linear, Azure DevOps, Fireflies, Slack —"
+      say "are not asked for here either. They belong to a project rather than to"
+      say "this machine, and \`onboard\` collects them: it knows which board the"
+      say "project actually uses and proves each one by using it."
+      ;;
+  esac
 
   # --- The factory engine. OPTIONAL, and the wording matters: people read the
   # --- script's name and assume the engine is required. It is not.
