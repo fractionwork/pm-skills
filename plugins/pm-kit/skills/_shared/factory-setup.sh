@@ -135,6 +135,48 @@ detect_platform() {
   esac
 }
 
+BINFMT_DIR="/proc/sys/fs/binfmt_misc"
+
+# Windows interop: whether this distro can execute Windows binaries.
+#
+# Everything that opens a browser from WSL — wslview, PowerShell's Start-Process,
+# and therefore the Asana OAuth callback and any browser login — works by running
+# a Windows binary from inside the distro. With interop off there is no error to
+# find: `powershell.exe` is simply "command not found", Python's webbrowser finds
+# no handler, and a sign-in appears to hang. Checked once, here, where the fix can
+# be explained rather than guessed at.
+interop_enabled() {
+  local f
+  for f in "$BINFMT_DIR/WSLInterop" "$BINFMT_DIR/WSLInterop-late"; do
+    [ -e "$f" ] || continue
+    head -1 "$f" 2>/dev/null | grep -qi '^enabled' && return 0
+  done
+  return 1
+}
+windows_on_path() { have powershell.exe || have pwsh.exe || have cmd.exe; }
+
+check_interop() {
+  [ "$PLATFORM" = "wsl" ] || return 0
+  if interop_enabled && windows_on_path; then
+    ok "Windows interop (browser sign-in will work)"
+    return 0
+  fi
+  if interop_enabled; then
+    warn "interop is on, but Windows is not on PATH"
+    say "browser sign-in may not open; check appendWindowsPath in /etc/wsl.conf"
+    note_fail "Windows on PATH (see /etc/wsl.conf: [interop] appendWindowsPath=true)"
+    return 1
+  fi
+  bad "Windows interop is DISABLED — browser sign-in cannot open"
+  say "add to /etc/wsl.conf:    [interop]"
+  say "                         enabled=true"
+  say "                         appendWindowsPath=true"
+  say "then, from Windows PowerShell:  wsl --shutdown"
+  say "interop is registered when the distro boots, so closing the window is not enough"
+  note_fail "Windows interop (edit /etc/wsl.conf, then wsl --shutdown)"
+  return 1
+}
+
 ubuntu_release() {
   [ -r /etc/os-release ] || { echo ""; return; }
   # shellcheck disable=SC1091
@@ -266,6 +308,11 @@ report_state() {
   step "factory-setup — status only, nothing will be changed"
   say "platform: $PLATFORM"
 
+  if [ "$PLATFORM" = "wsl" ]; then
+    if interop_enabled && windows_on_path; then ok "Windows interop"
+    elif interop_enabled; then warn "interop on, but Windows not on PATH — browser sign-in may not open"
+    else bad "Windows interop DISABLED — browser sign-in cannot open"; fi
+  fi
   have git && ok "git ($(git --version 2>/dev/null | awk '{print $3}'))" || bad "git missing"
   have curl && ok "curl" || bad "curl missing"
 
@@ -317,6 +364,8 @@ phase_prereqs() {
   export DEBIAN_FRONTEND=noninteractive
   export NEEDRESTART_MODE=a
   export NEEDRESTART_SUSPEND=1
+
+  check_interop
 
   if [ "$PLATFORM" = "wsl" ] || [ "$PLATFORM" = "linux" ]; then
     if [ "$PLATFORM" = "wsl" ]; then

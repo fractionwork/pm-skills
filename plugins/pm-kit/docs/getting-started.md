@@ -36,7 +36,7 @@ Two packages that aren't there by default, both of which fail confusingly:
 
 - **Windows interop** — every one of those openers works by running a Windows binary from inside
   the distro. `[interop] enabled=false` in `/etc/wsl.conf` turns that off, and then `wslview` and
-  `powershell.exe` are simply "command not found" with nothing to explain why. `wsl-bootstrap.sh`
+  `powershell.exe` are simply "command not found" with nothing to explain why. `factory-setup.sh`
   checks this and repairs it; the fix needs `wsl --shutdown` in Windows PowerShell to take effect,
   because interop is registered when the distro boots.
 
