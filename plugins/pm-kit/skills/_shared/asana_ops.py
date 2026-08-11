@@ -405,8 +405,28 @@ def oauth_auth():
     class CallbackHandler(http.server.BaseHTTPRequestHandler):
         def do_GET(self):
             qs = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
-            if qs.get("state", [None])[0] != state:
-                auth_error[0] = "State mismatch"
+            got_state = qs.get("state", [None])[0]
+
+            # A request carrying NO state is not the callback — it is a favicon,
+            # a prefetch, or someone opening the port to see what is there.
+            # Ignore it and keep listening. Treating it as a failure is what
+            # produced "State mismatch" for a handshake that had not happened
+            # yet, which sends people hunting for a CSRF problem they do not
+            # have.
+            if got_state is None and not qs.get("code") and not qs.get("error"):
+                self.send_response(204)
+                self.end_headers()
+                return
+
+            if got_state != state:
+                # A REAL mismatch, and in practice it means one thing: the
+                # browser opened an authorization link from an earlier attempt.
+                # Each run mints a fresh state, so an old tab can never match.
+                auth_error[0] = (
+                    "State mismatch — the browser approved an authorization link "
+                    "from an EARLIER attempt. Close any open Asana authorization "
+                    "tabs and run this again, approving only the newly opened one."
+                )
             elif qs.get("error"):
                 auth_error[0] = qs["error"][0]
             else:
@@ -424,7 +444,11 @@ def oauth_auth():
             pass  # suppress server logs
 
     server = http.server.HTTPServer(("localhost", CALLBACK_PORT), CallbackHandler)
-    server_thread = threading.Thread(target=server.handle_request)
+    # serve_forever, not a single handle_request — the same lesson the config
+    # form above already learned. One handled request means the FIRST thing to
+    # touch the port decides the outcome, and a browser rarely sends the
+    # callback first.
+    server_thread = threading.Thread(target=server.serve_forever, daemon=True)
     server_thread.start()
 
     print(f"Opening browser for Asana authorization...")
@@ -442,7 +466,10 @@ def oauth_auth():
         print()
     webbrowser.open(auth_url)
 
-    server_thread.join(timeout=120)
+    deadline = time.time() + 120
+    while auth_code[0] is None and auth_error[0] is None and time.time() < deadline:
+        time.sleep(0.2)
+    server.shutdown()
     server.server_close()
 
     if auth_error[0]:
