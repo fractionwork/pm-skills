@@ -221,14 +221,22 @@ check_hostname() {
 
   if getent hosts "$h" >/dev/null 2>&1; then
     ok "hostname resolves ($h)"
-    # WSL rewrites /etc/hosts on boot unless told not to, so the fix above is
-    # good for this session only.
-    if [ "$PLATFORM" = "wsl" ] && ! grep -q "generateHosts" /etc/wsl.conf 2>/dev/null; then
-      say "to make it stick across reboots, add to /etc/wsl.conf (APPEND — do not"
-      say "overwrite, the [interop] block lives there too):"
+    # WSL rewrites /etc/hosts on boot, so the fix above is good for this
+    # session only. The durable fix is the wsl.conf HOSTNAME — and only that.
+    #
+    # This used to also recommend `generateHosts = false`, which was wrong.
+    # WSL's generated /etc/hosts already contains
+    # `127.0.1.1  <name>.localdomain  <name>` for whatever hostname wsl.conf
+    # declares (verified on a live distro), so declaring the name is enough.
+    # Turning generation off just makes the user the permanent owner of
+    # /etc/hosts, including the Windows-side entries WSL injects, to solve a
+    # problem they would no longer have.
+    if [ "$PLATFORM" = "wsl" ] && ! grep -q "hostname" /etc/wsl.conf 2>/dev/null; then
+      say "to make it stick across restarts, run:"
+      say "    bash \$(dirname \"\$0\")/set-hostname.sh $h"
+      say "or add to /etc/wsl.conf (APPEND — the [interop] block lives there too):"
       say "    [network]"
       say "    hostname = $h"
-      say "    generateHosts = false"
     fi
   else
     warn "could not make \"$h\" resolve — sudo will keep warning, harmlessly"
