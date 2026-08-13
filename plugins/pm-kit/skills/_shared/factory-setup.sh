@@ -155,6 +155,47 @@ interop_enabled() {
 }
 windows_on_path() { have powershell.exe || have pwsh.exe || have cmd.exe; }
 
+# An unresolvable hostname makes EVERY sudo print two scary lines:
+#
+#   sudo: unable to resolve host factory-demo: Name or service not known
+#
+# It is only a warning — sudo still works — but it appears in the middle of the
+# install, twice per call, and reads as the installer failing. It happens the
+# moment somebody renames a WSL distro without updating /etc/hosts, which is a
+# perfectly reasonable thing to do before a demo.
+#
+# Fixed here rather than explained, because the fix is one line and the
+# explanation is three paragraphs.
+check_hostname() {
+  local h
+  h="$(hostname 2>/dev/null)" || return 0
+  [ -n "$h" ] || return 0
+  getent hosts "$h" >/dev/null 2>&1 && return 0
+
+  say "hostname \"$h\" does not resolve — sudo will warn on every call"
+  if grep -qE "^127\.0\.1\.1[[:space:]]" /etc/hosts 2>/dev/null; then
+    sudo sed -i "s/^127\.0\.1\.1[[:space:]].*/127.0.1.1\t$h/" /etc/hosts 2>/dev/null
+  else
+    printf '127.0.1.1\t%s\n' "$h" | sudo tee -a /etc/hosts >/dev/null 2>&1
+  fi
+
+  if getent hosts "$h" >/dev/null 2>&1; then
+    ok "hostname resolves ($h)"
+    # WSL rewrites /etc/hosts on boot unless told not to, so the fix above is
+    # good for this session only.
+    if [ "$PLATFORM" = "wsl" ] && ! grep -q "generateHosts" /etc/wsl.conf 2>/dev/null; then
+      say "to make it stick across reboots, add to /etc/wsl.conf (APPEND — do not"
+      say "overwrite, the [interop] block lives there too):"
+      say "    [network]"
+      say "    hostname = $h"
+      say "    generateHosts = false"
+    fi
+  else
+    warn "could not make \"$h\" resolve — sudo will keep warning, harmlessly"
+    note_fail "hostname resolution (add '127.0.1.1 $h' to /etc/hosts)"
+  fi
+}
+
 check_interop() {
   [ "$PLATFORM" = "wsl" ] || return 0
   if interop_enabled && windows_on_path; then
@@ -308,6 +349,11 @@ report_state() {
   step "factory-setup — status only, nothing will be changed"
   say "platform: $PLATFORM"
 
+  if getent hosts "$(hostname 2>/dev/null)" >/dev/null 2>&1; then
+    ok "hostname resolves ($(hostname))"
+  else
+    warn "hostname $(hostname) does not resolve — sudo warns on every call"
+  fi
   if [ "$PLATFORM" = "wsl" ]; then
     if interop_enabled && windows_on_path; then ok "Windows interop"
     elif interop_enabled; then warn "interop on, but Windows not on PATH — browser sign-in may not open"
@@ -365,6 +411,8 @@ phase_prereqs() {
   export NEEDRESTART_MODE=a
   export NEEDRESTART_SUSPEND=1
 
+  # Before any sudo, so its warnings never appear at all.
+  check_hostname
   check_interop
 
   if [ "$PLATFORM" = "wsl" ] || [ "$PLATFORM" = "linux" ]; then
