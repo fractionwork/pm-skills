@@ -903,18 +903,32 @@ rc_ensure() {
   done
 }
 
+# Is this variable already stored?
+secret_set() { grep -q "^export $1=" "$ENV_FILE" 2>/dev/null; }
+
 save_secret() {
-  local name="$1" value="$2"
+  local name="$1" value="$2" tmp
   mkdir -p "$DEVHAWK_HOME" 2>/dev/null
   touch "$ENV_FILE" 2>/dev/null
   chmod 600 "$ENV_FILE" 2>/dev/null
-  # Replace any existing line for this variable rather than appending a second.
-  if grep -q "^export $name=" "$ENV_FILE" 2>/dev/null; then
-    local tmp="$ENV_FILE.tmp.$$"
-    grep -v "^export $name=" "$ENV_FILE" > "$tmp" 2>/dev/null && mv "$tmp" "$ENV_FILE"
-    chmod 600 "$ENV_FILE" 2>/dev/null
-  fi
-  printf "export %s='%s'\n" "$name" "$value" >> "$ENV_FILE"
+
+  # Rewrite through a temp file, ALWAYS — never conditionally on grep's exit
+  # status. `grep -v` exits 1 when it filters everything out, so when the file
+  # held only this one variable — the normal case, since this is the only
+  # credential the script writes — the old `... && mv` silently skipped the
+  # move and the append below added a SECOND line. The shell takes the last
+  # one, so it worked, which is why it went unnoticed; meanwhile a rotated or
+  # revoked token stayed on disk indefinitely, and the file grew on every
+  # re-run.
+  tmp="$ENV_FILE.tmp.$$"
+  grep -v "^export $name=" "$ENV_FILE" > "$tmp" 2>/dev/null || true
+  # Single quotes are the only thing that can escape the quoting below, so
+  # close-escape-reopen them. An unescaped quote does not error — it produces a
+  # file the shell mis-parses on every future login.
+  printf "export %s='%s'\n" "$name" "$(printf '%s' "$value" | sed "s/'/'\\\\''/g")" >> "$tmp"
+  # Mode set BEFORE the move, so the credential is never briefly world-readable.
+  chmod 600 "$tmp" 2>/dev/null
+  mv "$tmp" "$ENV_FILE"
   rc_ensure '[ -f "$HOME/.devhawk/env" ] && . "$HOME/.devhawk/env"' '# devhawk: local credentials'
 }
 
@@ -958,7 +972,16 @@ phase_credentials() {
   printf '\n'
   say "The factory engine is a separate service. If you do not use one, skip this —"
   say "every kit works without it, and no skill will mention it."
-  if confirm "connect this machine to a factory engine?" no; then
+  # A re-run must never look like it might take something away. If a token is
+  # already stored, say so FIRST and make replacing it the explicit choice —
+  # the default stays "no", so pressing Enter keeps what is there.
+  local prompt="connect this machine to a factory engine?"
+  if secret_set FACTORY_API_TOKEN; then
+    ok "FACTORY_API_TOKEN already stored in $ENV_FILE — keeping it"
+    prompt="replace the stored FACTORY_API_TOKEN?"
+  fi
+
+  if confirm "$prompt" no; then
     t="$(read_secret 'FACTORY_API_TOKEN')"
     if [ -n "$t" ]; then
       save_secret FACTORY_API_TOKEN "$t"
@@ -967,7 +990,9 @@ phase_credentials() {
       say "MCP servers are resolved at startup, so a token exported into a running"
       say "session changes nothing — this is the most common 'the tools don't exist' report."
     else
-      warn "nothing entered — skipped"
+      # Empty input NEVER overwrites. Someone who opens the prompt and thinks
+      # better of it must not lose the credential they already had.
+      warn "nothing entered — existing value left untouched"
     fi
   else
     say "skipped — nothing here depends on it"
