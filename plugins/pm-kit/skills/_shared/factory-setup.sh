@@ -196,6 +196,49 @@ check_hostname() {
   fi
 }
 
+# Set a key inside a named section of an INI file, creating the section if it is
+# absent and leaving every OTHER section untouched.
+#
+# Section-aware on purpose. /etc/wsl.conf routinely carries [boot], [network]
+# and [user] alongside [interop], and the obvious `printf >> wsl.conf` produces
+# a SECOND [interop] section — which WSL resolves in a way nobody can predict
+# from reading the file. Appending is how you break a config while believing you
+# extended it.
+ini_set() {
+  local file="$1" section="$2" key="$3" value="$4" tmp
+  tmp="$(mktemp)" || return 1
+  sudo touch "$file" 2>/dev/null
+  # Trailing blank lines are BUFFERED so an inserted key lands with the rest of
+  # its section rather than after the gap that separates it from the next one.
+  # Cosmetic, but a config that looks mangled invites someone to "fix" it.
+  awk -v sect="$section" -v key="$key" -v val="$value" '
+    function flush_blanks(  i) { for (i = 1; i <= nb; i++) print ""; nb = 0 }
+    BEGIN { in_s = 0; done = 0; nb = 0 }
+    /^[[:space:]]*$/ { if (in_s) { nb++; next } print; next }
+    /^[[:space:]]*\[/ {
+      if (in_s && !done) { print key " = " val; done = 1 }
+      flush_blanks()
+      in_s = ($0 ~ "^[[:space:]]*\\[" sect "\\][[:space:]]*$")
+      if (in_s) seen = 1
+      print; next
+    }
+    {
+      flush_blanks()
+      if (in_s && $0 ~ "^[[:space:]]*" key "[[:space:]]*=") {
+        if (!done) { print key " = " val; done = 1 }
+        next
+      }
+      print
+    }
+    END {
+      if (in_s && !done) { print key " = " val; done = 1 }
+      flush_blanks()
+      if (!seen) { print ""; print "[" sect "]"; print key " = " val }
+    }
+  ' "$file" > "$tmp" 2>/dev/null || { rm -f "$tmp"; return 1; }
+  sudo cp "$tmp" "$file" && rm -f "$tmp"
+}
+
 check_interop() {
   [ "$PLATFORM" = "wsl" ] || return 0
   if interop_enabled && windows_on_path; then
@@ -204,17 +247,29 @@ check_interop() {
   fi
   if interop_enabled; then
     warn "interop is on, but Windows is not on PATH"
-    say "browser sign-in may not open; check appendWindowsPath in /etc/wsl.conf"
-    note_fail "Windows on PATH (see /etc/wsl.conf: [interop] appendWindowsPath=true)"
+    if ini_set /etc/wsl.conf interop appendWindowsPath true; then
+      ok "set appendWindowsPath in /etc/wsl.conf"
+      say "run 'wsl --shutdown' from Windows PowerShell to apply."
+      note_fail "Windows on PATH (config written — run 'wsl --shutdown' to apply)"
+    else
+      note_fail "Windows on PATH (see /etc/wsl.conf: [interop] appendWindowsPath=true)"
+    fi
     return 1
   fi
   bad "Windows interop is DISABLED — browser sign-in cannot open"
-  say "add to /etc/wsl.conf:    [interop]"
-  say "                         enabled=true"
-  say "                         appendWindowsPath=true"
-  say "then, from Windows PowerShell:  wsl --shutdown"
-  say "interop is registered when the distro boots, so closing the window is not enough"
-  note_fail "Windows interop (edit /etc/wsl.conf, then wsl --shutdown)"
+  if ini_set /etc/wsl.conf interop enabled true && ini_set /etc/wsl.conf interop appendWindowsPath true; then
+    ok "wrote [interop] to /etc/wsl.conf"
+    warn "NOT active until the distro restarts"
+    say "from Windows PowerShell:  wsl --shutdown"
+    say "interop is registered at boot, so closing the terminal is not enough."
+    note_fail "Windows interop (config written — run 'wsl --shutdown' to apply)"
+  else
+    say "could not write /etc/wsl.conf; add by hand:"
+    say "    [interop]"
+    say "    enabled = true"
+    say "    appendWindowsPath = true"
+    note_fail "Windows interop (edit /etc/wsl.conf, then wsl --shutdown)"
+  fi
   return 1
 }
 
