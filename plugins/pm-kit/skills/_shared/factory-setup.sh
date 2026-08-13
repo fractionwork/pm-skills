@@ -74,6 +74,42 @@ step() { printf '\n\033[1m%s\033[0m\n' "$1"; }
 note_fail() { FAILED="$FAILED$1"$'\n'; }
 have() { command -v "$1" >/dev/null 2>&1; }
 
+# Where a LINUX `claude` lives, or nothing.
+#
+# `have claude` is not good enough on WSL. Interop puts the Windows PATH inside
+# the distro — 19 `/mnt/c` entries on a stock box — so a Claude Code installed on
+# Windows answers `command -v claude` perfectly well, and the script then reports
+# it as present and installs nothing. That is exactly the install docs/
+# prerequisites.md tells people they cannot reuse: calling it from WSL reaches
+# the Linux project over the 9P filesystem, every file operation crosses a VM
+# boundary, and path translation breaks the plugin scripts.
+#
+# So the WSL symptom is "Claude Code is missing" reported by a user whose script
+# said it was fine. Resolve the path and reject anything under /mnt or ending
+# .exe; the caller installs a native one regardless of what Windows offers.
+# The rule itself, pure and separate from PATH lookup so it can be tested
+# against real Windows paths — which a test cannot create under /mnt.
+# `/mnt/*` is where WSL mounts the Windows drives; `*.exe` covers a Windows
+# binary reached some other way (a symlink into $HOME, a wrapper on $PATH).
+is_windows_path() {
+  case "$1" in /mnt/*|*.exe) return 0 ;; *) return 1 ;; esac
+}
+
+native_claude() {
+  local p; p="$(command -v claude 2>/dev/null)" || return 1
+  is_windows_path "$p" && return 1
+  printf '%s\n' "$p"
+}
+
+# A Windows claude reachable from this distro — reported, never used.
+windows_claude() {
+  local p; p="$(command -v claude 2>/dev/null)" || return 1
+  is_windows_path "$p" || return 1
+  printf '%s\n' "$p"
+}
+
+claude_version() { claude --version 2>/dev/null | head -1; }
+
 # Ask. Second argument is the default when the human just presses Enter:
 # `yes` (the default) for "shall I install this", `no` for anything that
 # records a credential.
@@ -424,7 +460,10 @@ report_state() {
 
   local py; if py="$(find_python)"; then ok "python: $py ($($py -V 2>&1))"; else warn "no python >= $PYTHON_MIN (pm-kit's Asana MCP needs one)"; fi
 
-  if have claude; then ok "claude ($(claude --version 2>/dev/null | head -1))"; else bad "Claude Code missing"; fi
+  if native_claude >/dev/null; then ok "claude ($(claude_version))"
+  elif local win; win="$(windows_claude)"; then
+    bad "only a WINDOWS Claude Code is on PATH ($win) — it cannot drive a Linux project"
+  else bad "Claude Code missing"; fi
 
   if have gh; then
     if gh auth status >/dev/null 2>&1; then ok "gh authenticated"; else warn "gh installed but not authenticated"; fi
@@ -565,28 +604,69 @@ phase_prereqs() {
   fi
 
   # ── Claude Code ──
-  if have claude; then
-    ok "Claude Code ($(claude --version 2>/dev/null | head -1))"
-  else
-    if curl -fsSL https://claude.ai/install.sh -o /tmp/claude-install.sh 2>/dev/null && bash /tmp/claude-install.sh >/dev/null 2>&1 </dev/null; then
-      # The installer drops the binary in ~/.local/bin (or ~/.claude/local) and
-      # edits an rc file — neither of which helps THIS shell. Telling the user
-      # to open a new terminal was not a cosmetic wart: phases 3 and 4 then find
-      # no `claude`, so the marketplace and every plugin are skipped, and the
-      # script completes "successfully" having installed nothing it exists to
-      # install. Only a fresh box shows this, because anywhere else claude is
-      # already on PATH.
-      adopt_path "$HOME/.local/bin" "$HOME/.claude/local" "$HOME/bin"
-      if have claude; then
-        ok "Claude Code ($(claude --version 2>/dev/null | head -1))"
-      else
-        bad "installed but not on PATH — the marketplace and plugin steps cannot run"
-        say "find it with:  ls ~/.local/bin/claude ~/.claude/local/claude 2>/dev/null"
-        note_fail "claude on PATH (re-run this script from a new terminal)"
-      fi
+  #
+  # INSTALL OR UPDATE, not install-if-absent. A box that already had it kept
+  # whatever version it had forever, so re-running the one-liner — the documented
+  # way to fix a machine — never actually refreshed the tool the whole kit runs
+  # inside.
+  install_or_update_claude
+}
+
+# Install Claude Code, or update the one that is already here.
+install_or_update_claude() {
+  local win; win="$(windows_claude)" && {
+    # Reported before anything else: on WSL this is why `have claude` used to
+    # succeed while the user had no usable Claude Code. Not an error — we just
+    # install the native one alongside it and let PATH order sort itself out.
+    warn "found a WINDOWS Claude Code on PATH ($win)"
+    say "that one cannot drive a Linux project — installing the native build"
+  }
+
+  if native_claude >/dev/null; then
+    local before; before="$(claude_version)"
+    ok "Claude Code ($before)"
+    # `claude update` is the tool's own updater and a no-op when current, so
+    # this is safe to run on every pass. Failure is NOT fatal: an up-to-date
+    # install that cannot reach the update server still works fine, and dying
+    # here would skip the marketplace and every plugin.
+    if claude update >/dev/null 2>&1; then
+      local after; after="$(claude_version)"
+      [ "$after" != "$before" ] && ok "updated to $after"
     else
-      bad "could not install Claude Code"; note_fail "Claude Code"
+      warn "could not check for updates — continuing with $before"
     fi
+    return 0
+  fi
+
+  # Keep the installer's own output. It used to go to /dev/null, so the only
+  # thing a failed install could say was "could not install Claude Code" — no
+  # reason, nothing to act on, on the one step everything after it depends on.
+  local log="${TMPDIR:-/tmp}/factory-claude-install.log"
+  if curl -fsSL https://claude.ai/install.sh -o /tmp/claude-install.sh 2>>"$log" &&
+     bash /tmp/claude-install.sh >>"$log" 2>&1 </dev/null; then
+    # The installer drops the binary in ~/.local/bin (or ~/.claude/local) and
+    # edits an rc file — neither of which helps THIS shell. Telling the user
+    # to open a new terminal was not a cosmetic wart: phases 3 and 4 then find
+    # no `claude`, so the marketplace and every plugin are skipped, and the
+    # script completes "successfully" having installed nothing it exists to
+    # install. Only a fresh box shows this, because anywhere else claude is
+    # already on PATH.
+    adopt_path "$HOME/.local/bin" "$HOME/.claude/local" "$HOME/bin"
+    if native_claude >/dev/null; then
+      ok "Claude Code ($(claude_version))"
+    else
+      bad "installed but not on PATH — the marketplace and plugin steps cannot run"
+      say "find it with:  ls ~/.local/bin/claude ~/.claude/local/claude 2>/dev/null"
+      note_fail "claude on PATH (re-run this script from a new terminal)"
+    fi
+  else
+    bad "could not install Claude Code"
+    say "installer output: $log"
+    # The last few lines are almost always the reason (no curl, TLS failure, a
+    # read-only HOME). Showing them beats sending someone to a file they will
+    # not open.
+    [ -s "$log" ] && tail -3 "$log" | while IFS= read -r l; do say "$l"; done
+    note_fail "Claude Code"
   fi
 }
 
