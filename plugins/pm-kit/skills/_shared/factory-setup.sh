@@ -51,6 +51,10 @@ CHECK_ONLY=0
 ASSUME_YES=0
 ROLE=""
 FAILED=""
+# Whether this run put anything new on PATH. Drives the closing notice: a
+# "restart your terminal" banner that fires every time is one people stop
+# reading, and then miss on the one run where it mattered.
+PATH_CHANGED=0
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -680,7 +684,12 @@ adopt_path() {
   local d
   for d in "$@"; do
     [ -d "$d" ] || continue
-    case ":$PATH:" in *":$d:"*) ;; *) PATH="$d:$PATH"; export PATH ;; esac
+    case ":$PATH:" in
+      *":$d:"*) ;;
+      # A directory that was NOT already here means the user's own shell is now
+      # behind — which is the whole condition for the closing notice.
+      *) PATH="$d:$PATH"; export PATH; PATH_CHANGED=1 ;;
+    esac
     rc_ensure "case \":\$PATH:\" in *\":$d:\"*) ;; *) PATH=\"$d:\$PATH\" ;; esac" "# devhawk: $d on PATH"
   done
 }
@@ -991,7 +1000,30 @@ else
   ok "everything completed"
 fi
 
-printf '\n'
-say "Next: restart your terminal, then start Claude Code and run /help to see the skills."
+# The one instruction people actually have to follow, and it used to be the
+# QUIETEST line on screen — `say`, four spaces, no colour, at the end of a page
+# of output. Reported exactly as you would expect: "ran the installer again,
+# claude is still not found." It was installed; the shell that asked had simply
+# never re-read its PATH.
+#
+# So: a banner, the REASON, and a command that fixes it without opening a new
+# terminal. Shown only when this run actually changed PATH — a notice that fires
+# every time is one people learn to skip, and then miss when it matters.
+if [ "$PATH_CHANGED" = "1" ]; then
+  printf '\n\033[1;33m%s\033[0m\n' '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━'
+  printf '\033[1;33m  ONE MORE STEP — this terminal cannot see the new tools yet\033[0m\n'
+  printf '\033[1;33m%s\033[0m\n\n' '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━'
+  say "claude was installed, but a shell that is already running never re-reads"
+  say "its PATH. Until you do one of these it will still say command not found —"
+  say "the install is fine, this window is stale."
+  printf '\n'
+  printf '      \033[1mexec %s -l\033[0m       reload this terminal, right now\n' "${SHELL:-/bin/bash}"
+  say "  ...or close this window and open a new one"
+  printf '\n'
+  say "Then run: claude"
+else
+  printf '\n'
+  say "Next: start Claude Code and run /help to see the skills."
+fi
 say "Re-run with --check at any time to see the state of this machine."
 printf '\n'
