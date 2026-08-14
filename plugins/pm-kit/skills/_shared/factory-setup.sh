@@ -408,19 +408,33 @@ find_python() {
 # ── role → kits ─────────────────────────────────────────────────────────────
 kits_for_role() {
   case "$1" in
-    pm)       echo "pm-kit" ;;
-    engineer) echo "pm-kit ship-kit" ;;
-    devhawk)  echo "pm-kit ship-kit devhawk-kit" ;;
+    pm)       echo "pm-kit factory-kit" ;;
+    engineer) echo "pm-kit ship-kit factory-kit" ;;
+    devhawk)  echo "pm-kit ship-kit devhawk-kit factory-kit" ;;
     auditor)  echo "audit-kit" ;;
-    all)      echo "pm-kit ship-kit devhawk-kit audit-kit" ;;
+    all)      echo "pm-kit ship-kit devhawk-kit audit-kit factory-kit" ;;
     *)        echo "" ;;
   esac
 }
 
-# pm-kit alone comes from the PUBLIC mirror, which Claude Code clones with no
-# credentials at all. That is the whole reason a PM never has to run `gh auth`.
+# WHY A PM NOW NEEDS THE PRIVATE MARKETPLACE.
+#
+# This used to send `pm` to the PUBLIC mirror precisely so a PM never had to run
+# `gh auth` — a real benefit, and it was the right call while pm-kit's only job
+# was driving Asana with the user's own credential.
+#
+# It stopped being right when the factory became the way a PM reaches a board.
+# The factory MCP server ships in `factory-kit`, which is private, and without it
+# a PM has no factory tools at all — so the role that the conduit exists for was
+# the one role that could not reach it. Managing a Linear or Azure DevOps board
+# from a workstation is not possible on the public path at all: pm-kit's own
+# server is Asana-only.
+#
+# The public mirror is unchanged and still complete for what it covers: pm-kit
+# alone, installed by hand, remains a working Asana-direct toolkit for anyone
+# outside Fraction.
 needs_private_marketplace() {
-  case " $1 " in *" ship-kit "*|*" devhawk-kit "*|*" audit-kit "*) return 0 ;; esac
+  case " $1 " in *" ship-kit "*|*" devhawk-kit "*|*" audit-kit "*|*" factory-kit "*) return 0 ;; esac
   return 1
 }
 
@@ -954,9 +968,16 @@ phase_credentials() {
   # wait for a prompt that was never coming: `onboard` ships in devhawk-kit, so
   # a PM who installed pm-kit alone will never run it. Lead with the one that
   # applies to everybody.
-  say "To drive an Asana board from here, run \`/pm-setup\` inside Claude Code."
-  say "The runtime is already installed above; that signs it in. It is the only"
-  say "step left for board work on this machine."
+  # TWO paths, and saying only one of them is how a Linear or ADO user was told
+  # to go and authenticate against Asana. `/pm-setup` is the Asana-DIRECT path;
+  # the factory path covers all three boards and needs nothing on this machine
+  # but the token collected below.
+  say "To drive an Asana board with YOUR OWN Asana account, run \`/pm-setup\`."
+  say "The runtime is already installed above; that signs it in."
+  say ""
+  say "To manage a board THROUGH THE FACTORY — Asana, Linear or Azure DevOps, with"
+  say "no repository cloned and no board credential stored here — run"
+  say "\`/factory-connect\` instead. It needs only the token asked for below."
   case " $(kits_for_role "$ROLE") " in
     *" devhawk-kit "*)
       say ""
@@ -972,16 +993,30 @@ phase_credentials() {
   printf '\n'
   say "The factory engine is a separate service. If you do not use one, skip this —"
   say "every kit works without it, and no skill will mention it."
+  # …EXCEPT that for a PM the factory is now the only way to reach a Linear or
+  # ADO board from here, so "optional" is misleading advice to give them. The
+  # default flips per role rather than the wording pretending both are the same.
+  local factory_default=no
+  if [ "$ROLE" = "pm" ]; then
+    factory_default=yes
+    say ""
+    say "You chose the PM kits, so this is worth saying plainly: the factory is how"
+    say "you manage a Linear or Azure DevOps board from this machine. Without a"
+    say "token, board work here is Asana-only and uses your own Asana account."
+  fi
   # A re-run must never look like it might take something away. If a token is
   # already stored, say so FIRST and make replacing it the explicit choice —
-  # the default stays "no", so pressing Enter keeps what is there.
+  # the default returns to "no" even for a PM, so pressing Enter keeps what is
+  # there. The role-based default is about ASKING somebody who has nothing; it
+  # must never become a default answer of "yes, destroy the one you have".
   local prompt="connect this machine to a factory engine?"
   if secret_set FACTORY_API_TOKEN; then
     ok "FACTORY_API_TOKEN already stored in $ENV_FILE — keeping it"
     prompt="replace the stored FACTORY_API_TOKEN?"
+    factory_default=no
   fi
 
-  if confirm "$prompt" no; then
+  if confirm "$prompt" "$factory_default"; then
     t="$(read_secret 'FACTORY_API_TOKEN')"
     if [ -n "$t" ]; then
       save_secret FACTORY_API_TOKEN "$t"

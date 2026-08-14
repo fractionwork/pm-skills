@@ -135,7 +135,8 @@ Hygiene doesn't auto-set `notes`, `start_on`, `due_on` — those need values you
 ```bash
 # Description / dates (PUT /projects/<gid>)
 python3 -c "
-from scripts.asana_ops import api
+import sys; sys.path.insert(0, '${CLAUDE_PLUGIN_ROOT}/skills/_shared')
+from asana_ops import api
 api('PUT', '/projects/<PROJECT_GID>', {
     'notes': '<description>',
     'start_on': '<YYYY-MM-DD or null>',
@@ -190,7 +191,8 @@ If the workspace uses portfolios for product or client grouping (Fraction conven
 ```bash
 # Not on the curated MCP — use the api() helper (POST /portfolios/<gid>/addItem):
 python3 -c "
-from scripts.asana_ops import api
+import sys; sys.path.insert(0, '${CLAUDE_PLUGIN_ROOT}/skills/_shared')
+from asana_ops import api
 api('POST', '/portfolios/<PORTFOLIO_GID>/addItem', {'item': '<PROJECT_GID>'})
 "
 ```
