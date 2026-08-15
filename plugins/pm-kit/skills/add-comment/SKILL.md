@@ -15,14 +15,20 @@ description: >
 
 Post a properly-formatted comment on a single PM card. Per-system formatting rules and validation are baked in so the call doesn't fail at the API.
 
+> **Which surface — decide this FIRST.** Read
+> `${CLAUDE_PLUGIN_ROOT}/skills/_shared/board-surface.md`. A project registered with a
+> factory is worked through the factory MCP, on whichever board it uses; anything else is
+> direct, under your own credential.
+
 ## Step 1: Resolve the target card
 
 If the user names the card by ID/permalink/URL, use it directly.
 
-If the user references it by description ("the approver dropdown ticket", "the bug Austin filed"), search the active project via the appropriate MCP:
-- **Asana**: the Asana MCP's `search_tasks` against the project, scored by title overlap
-- **Linear**: search team issues
-- **Jira**: search via Atlassian Rovo MCP with JQL
+If they reference it by description ("the approver dropdown ticket", "the bug Austin
+filed"), resolve **"search the board"** per `board-surface.md` and score by title overlap.
+On the factory path that is one call whatever the board is; direct, it is the host
+system's own search (Asana `search_tasks`, Linear team issues, Jira JQL via the connected
+Atlassian MCP).
 
 If multiple matches, list the top 5 with permalinks and ask which one. Don't guess.
 
@@ -107,7 +113,12 @@ If the MCP rejects wiki markup, the error will name ADF. Retry via ADF construct
 
 When the user writes `@<name>` in their input:
 
-1. **Asana** — resolve the user via `python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/asana_ops.py --find-user "<name>"` (matches name/email substring; prints `gid<TAB>name<TAB>email` per hit). Disambiguate by full name + email if multiple. Replace `@Jane` with `<a data-asana-gid="<user-gid>">@Jane</a>`. If no match, leave as plain text and warn the user. (User lookup isn't on the curated MCP, so it runs through the script — still first-party.)
+0. **On the factory path**, resolve "list assignable people" per `board-surface.md` and
+   match the name against it. That returns board user ids on all three systems. Note the
+   factory posts PLAIN TEXT, so an Asana `@`-mention cannot be rendered as a link — write
+   the person's name and say the mention is not clickable, rather than emitting markup the
+   board will show verbatim.
+1. **Asana, direct** — resolve the user via `python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/asana_ops.py --find-user "<name>"` (matches name/email substring; prints `gid<TAB>name<TAB>email` per hit). Disambiguate by full name + email if multiple. Replace `@Jane` with `<a data-asana-gid="<user-gid>">@Jane</a>`. If no match, leave as plain text and warn the user. (User lookup isn't on the curated MCP, so it runs through the script — still first-party.)
 2. **Linear** — search users via MCP. Replace with the form Linear's API expects (typically `@<display-name>`).
 3. **Jira** — Atlassian uses account IDs in mentions: `[~accountid:<id>]` for wiki markup, or the `mention` ADF node. Resolve with the connected Atlassian MCP's account-id lookup (`lookupJiraAccountId`).
 

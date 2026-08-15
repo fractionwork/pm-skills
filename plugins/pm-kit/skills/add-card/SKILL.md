@@ -19,13 +19,38 @@ Create a single PM card with all hygiene rules baked in. Mirror of how `asana-hy
 
 The canonical hygiene rules live in `${CLAUDE_PLUGIN_ROOT}/skills/_shared/asana-conventions.md` and `${CLAUDE_PLUGIN_ROOT}/skills/asana-hygiene/SKILL.md`. This skill is the **creation-time enforcement layer** — don't duplicate the rules here, reference them.
 
-> **Tool precedence:** prefer the **first-party `asana` MCP** (`${CLAUDE_PLUGIN_ROOT}/skills/_shared/asana_mcp.py`); fall back to **`${CLAUDE_PLUGIN_ROOT}/skills/_shared/asana_ops.py`** for anything it doesn't expose or when the MCP isn't connected; do **not** use other Asana MCPs (the official plugin / community servers are superseded). The script self-authenticates and hits the REST API directly, so it can do anything the MCP can plus what the MCP structurally can't (create fields/sections/tags, upload files via `--attach-file`, archive, etc.). Full precedence + command surface in `${CLAUDE_PLUGIN_ROOT}/skills/_shared/asana-conventions.md` → "Tool precedence".
+> **Which surface — decide this FIRST.** Read
+> `${CLAUDE_PLUGIN_ROOT}/skills/_shared/board-surface.md` and resolve it before Step 1,
+> because it changes every step below. A project registered with a factory is worked
+> through the **factory MCP** — Asana, Linear or Azure DevOps, the project's own
+> credential, every write attributed to you. Anything else is **Asana-direct**, under your
+> own credential.
+>
+> **Asana-direct tool precedence:** prefer the first-party `asana` MCP
+> (`${CLAUDE_PLUGIN_ROOT}/skills/_shared/asana_mcp.py`); fall back to
+> `${CLAUDE_PLUGIN_ROOT}/skills/_shared/asana_ops.py` for anything it doesn't expose or
+> when the MCP isn't connected; do **not** use other Asana MCPs (the official plugin /
+> community servers are superseded). The script self-authenticates and hits the REST API
+> directly, so it can do anything the MCP can plus what the MCP structurally can't (create
+> fields/sections/tags, upload files via `--attach-file`, archive, etc.). Full precedence +
+> command surface in `${CLAUDE_PLUGIN_ROOT}/skills/_shared/asana-conventions.md` → "Tool
+> precedence". **None of it applies on the factory path** — those commands need a local
+> Asana credential a factory user does not have.
 
 ## Step 1: Resolve the target project
 
-If the user names the project ("add a ticket to ELEVAT3 about X"), resolve it via the Asana MCP's `list_projects(scope="all")` and match by name — the default scope is only the projects you belong to, and a named board you are not a member of must still resolve (or `python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/asana_ops.py --list-projects`; the Linear equivalent for that system).
+**On the factory path**, the project is a factory project key. Resolve it per
+`${CLAUDE_PLUGIN_ROOT}/skills/_shared/factory.md`: the explicitly chosen
+`~/.devhawk/pm/active-project.json` first, then the git slug if there is a checkout, then
+`list_projects` matched by name. The board behind it may be Asana, Linear or Azure DevOps
+and nothing below needs to care which.
 
-If the user is ambiguous ("add a ticket about X"), check `.devhawk-work.json` for the active project. If still unclear, ask: "Which project — ELEVAT3, Paryani Construction, …?"
+**Asana-direct**, resolve it via the Asana MCP's `list_projects(scope="all")` and match by
+name — the default scope is only the projects you belong to, and a named board you are not
+a member of must still resolve (or `python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/asana_ops.py --list-projects`).
+
+If the user is ambiguous ("add a ticket about X"), check the active project. If still
+unclear, ask: "Which project — ELEVAT3, Paryani Construction, …?"
 
 ## Step 2: Decide target section — INBOX or BACKLOG
 
@@ -52,9 +77,13 @@ Before any field validation or creation, **search the target project for likely 
 
 ### Searching
 
-For **Asana**: the Asana MCP's `search_tasks` against the resolved project with the proposed title's significant tokens (drop stopwords: a/the/and/of/to/for/on/in/with/is/are). Take top ~10 hits.
+Resolve **"search the board"** per `board-surface.md` and query it with the proposed
+title's significant tokens (drop stopwords: a/the/and/of/to/for/on/in/with/is/are). Take
+the top ~10 hits, excluding finished work.
 
-For **Linear**: search team issues via MCP, same token approach. Filter out completed/cancelled.
+On the factory path this is one call regardless of board — and if the reply carries
+`truncated: true`, the board was bigger than one scan, so an empty result means "not in
+what was searched" rather than "does not exist". Say which, rather than declaring it new.
 
 ### Scoring — what counts as a likely dupe
 
