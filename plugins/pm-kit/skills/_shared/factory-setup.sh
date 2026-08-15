@@ -28,7 +28,7 @@
 #   ./factory-setup.sh                    # interactive
 #   ./factory-setup.sh --check            # report state, change nothing
 #   ./factory-setup.sh --role engineer --yes   # non-interactive
-#   ./factory-setup.sh --role pm          # public marketplace only, no GitHub auth
+#   ./factory-setup.sh --role pm          # board management: pm-kit + factory-kit
 #
 # Roles: pm · engineer · devhawk · auditor · all
 #
@@ -417,25 +417,32 @@ kits_for_role() {
   esac
 }
 
-# WHY A PM NOW NEEDS THE PRIVATE MARKETPLACE.
+# EVERY ROLE HERE USES THE PRIVATE MARKETPLACE, including `pm`.
 #
-# This used to send `pm` to the PUBLIC mirror precisely so a PM never had to run
-# `gh auth` — a real benefit, and it was the right call while pm-kit's only job
-# was driving Asana with the user's own credential.
+# This script is Fraction's internal installer. The people running it are staff,
+# they have GitHub accounts, and they get the same marketplace as each other —
+# a PM is not a lesser install, they just need fewer kits.
 #
-# It stopped being right when the factory became the way a PM reaches a board.
-# The factory MCP server ships in `factory-kit`, which is private, and without it
-# a PM has no factory tools at all — so the role that the conduit exists for was
-# the one role that could not reach it. Managing a Linear or Azure DevOps board
-# from a workstation is not possible on the public path at all: pm-kit's own
-# server is Asana-only.
+# It used to route `pm` to the PUBLIC mirror so a PM never had to run `gh auth`.
+# That was a real convenience and it is gone deliberately, because it bought
+# less than it looked: the public mirror carries pm-kit alone, whose MCP server
+# is Asana-only, so a PM on that path could not manage a Linear or Azure DevOps
+# board at all and could not reach a factory.
 #
-# The public mirror is unchanged and still complete for what it covers: pm-kit
-# alone, installed by hand, remains a working Asana-direct toolkit for anyone
-# outside Fraction.
+# Stated as a fact about WHO runs this, not as a consequence of which kits
+# happen to be private. The kit-derived version was true by accident — every
+# role's list contains something private today — and a future kit shuffle could
+# silently drop a role back onto the public mirror, where half its tools do not
+# exist.
+#
+# The public mirror still has a job, and it is a different one: somebody outside
+# Fraction installing pm-kit by hand for their own Asana board, per
+# docs/claude-plugins.md. They do not run this script.
 needs_private_marketplace() {
-  case " $1 " in *" ship-kit "*|*" devhawk-kit "*|*" audit-kit "*|*" factory-kit "*) return 0 ;; esac
-  return 1
+  # Deliberately ignores its argument. Kept as a function, and still called,
+  # because the call sites read as a question worth asking — and because the day
+  # an external-facing role exists, this is the one place that has to change.
+  return 0
 }
 
 prompt_role() {
@@ -720,7 +727,7 @@ phase_github() {
   step "2/5  GitHub access"
   local kits; kits="$(kits_for_role "$ROLE")"
   if ! needs_private_marketplace "$kits"; then
-    ok "not needed — pm-kit comes from the public marketplace"
+    ok "not needed — these kits come from the public marketplace"
     say "no gh auth, no SSH key, no GitHub account required"
     return 0
   fi
