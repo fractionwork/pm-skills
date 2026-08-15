@@ -1,20 +1,32 @@
 ---
 name: pm-setup
 description: >-
-  Install pm-kit's Python runtime and authenticate against Asana — the one-time
-  setup the board skills need. Creates a virtualenv at ~/.devhawk/pm, installs the
-  MCP SDK, and walks the Asana OAuth flow (or accepts a PAT). Run this right after
-  installing pm-kit, or whenever a skill reports "no Asana credential", "the mcp
-  package is missing", or the Asana MCP server fails to start. Triggers on "set up
-  pm-kit", "install the PM tools", "connect Asana", "authenticate Asana", "asana
-  not connected", "/pm-setup".
+  ASANA-DIRECT setup — install pm-kit's Python runtime and authenticate with YOUR
+  OWN Asana account. Creates a virtualenv at ~/.devhawk/pm, installs the MCP SDK,
+  and walks the Asana OAuth flow (or accepts a PAT). Needed for asana-bootstrap
+  and asana-hygiene, and for any Asana board a factory does not manage. NOT needed
+  to manage a board through a factory engine — that is /factory-connect, which
+  needs no Python and works on Linear and Azure DevOps too. Run this whenever a
+  skill reports "no Asana credential", "the mcp package is missing", or the Asana
+  MCP server fails to start. Triggers on "connect Asana", "authenticate Asana",
+  "asana not connected", "install the PM tools", "/pm-setup".
 allowed-tools: Bash(${CLAUDE_SKILL_DIR}/scripts/pm-setup.sh:*)
 ---
 
-# pm-kit setup
+# pm-kit setup — the Asana-direct path
 
 Everything else in this kit installs with the plugin. This is the exception: a plugin can ship a
 Python MCP server but cannot build the environment to run it, so that one step stays explicit.
+
+> **Check this is the path you want first.** This sets up board access under
+> **your own Asana account**. If the board belongs to a project registered with a
+> factory engine, you want **`/factory-connect`** instead: no Python, no OAuth, no
+> credential on this machine, and it works on Linear and Azure DevOps as well as
+> Asana. See `${CLAUDE_PLUGIN_ROOT}/skills/_shared/board-surface.md`.
+>
+> You still need this one for `asana-bootstrap` and `asana-hygiene`, whose
+> structural work — creating custom fields, sections, enum options, workspace
+> tags — no MCP can do, and for any Asana board no factory knows about.
 
 ## Steps
 

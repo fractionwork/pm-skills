@@ -154,7 +154,32 @@ For **INBOX cards specifically**: skip Priority / Task Type / Story Points / Rel
 
 ## Step 5: Create the card
 
-Asana: `python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/asana_ops.py --create-task '<json>'` (or pipe the spec with `--create-task -`). The spec carries `name`, `notes`, `projects` (the resolved project gid), `section` (`"BACKLOG"` or `"INBOX"` — resolved within the project), `custom_fields` (`{field_gid: value}` — only those required for the target section per Step 4, **including `Feature`**), `sprint` (`[enum_option_gid]` — applied via a follow-up PUT since multi_enum can't be set on create), and `audit_tag: true` (stamps Marker A — see Step 6.5 — automatically). One call creates the task, places it in the section, applies the fields, and tags it; it prints `{ok, task_gid, permalink, warnings}`. The curated `asana` MCP **deliberately omits raw task creation** (it exposes only `capture_inbox_idea` for light INBOX capture), so rich BACKLOG creation runs through the script — still first-party, never a third-party Asana MCP.
+**Resolve the surface first** — `${CLAUDE_PLUGIN_ROOT}/skills/_shared/board-surface.md`.
+The two paths differ in what they can express, so pick before you start rather
+than discovering it halfway.
+
+### Through the factory (a registered project)
+
+`submit_idea(project_key, title, body)`. It creates the board item, creates the
+engine card, and starts the pipeline — a plain board create would leave a card
+the factory never sees, identical on the board and behaving nothing alike.
+
+What this path CANNOT do, and you must say so rather than working around it:
+
+- **It creates in INBOX.** Rich BACKLOG creation with custom fields is Asana-only
+  script work (below). For a factory project, create in INBOX and let the
+  INBOX → BACKLOG promotion conversation fill the fields in — which is the
+  intended flow anyway, and matches the lighter pre-flight above.
+- **It cannot stamp the workspace tag** (Marker A, Step 6.5). Note it and carry
+  on; Marker B, the description footer, still applies and is the one audit
+  scripts parse.
+
+Then move it if the human asked for a specific column: `board_move_item`, which
+takes a column name including ones the factory has no state for.
+
+### Asana-direct (no factory, or a board it does not know)
+
+`python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/asana_ops.py --create-task '<json>'` (or pipe the spec with `--create-task -`). The spec carries `name`, `notes`, `projects` (the resolved project gid), `section` (`"BACKLOG"` or `"INBOX"` — resolved within the project), `custom_fields` (`{field_gid: value}` — only those required for the target section per Step 4, **including `Feature`**), `sprint` (`[enum_option_gid]` — applied via a follow-up PUT since multi_enum can't be set on create), and `audit_tag: true` (stamps Marker A — see Step 6.5 — automatically). One call creates the task, places it in the section, applies the fields, and tags it; it prints `{ok, task_gid, permalink, warnings}`. The curated `asana` MCP **deliberately omits raw task creation** (it exposes only `capture_inbox_idea` for light INBOX capture), so rich BACKLOG creation runs through the script — still first-party, never a third-party Asana MCP.
 
 **Always top-level — never pass `parent`.** The flat-task policy (`${CLAUDE_PLUGIN_ROOT}/skills/_shared/asana-conventions.md` → "Task structure") forbids subtasks for workflow items: Asana can't move a subtask between board sections, so it would be stuck off the board forever. The epic association is carried by the **`Feature`** field, not by nesting. If you ever need to relate a card to an epic definition card, set matching `Feature` values — do not set `parent`. (Legacy subtasks found in a project are elevated with `python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/asana_ops.py --elevate-subtasks <PROJECT_GID>`.)
 
@@ -163,7 +188,12 @@ Asana: `python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/asana_ops.py --create-task 
 Per `feedback_pm_source_attribution.md` and `asana-hygiene` Step 7 — **two-step rule, always**:
 
 1. Description includes a `Source: …` line at the bottom (per the format library in `asana-hygiene` Step 7).
-2. Post a comment on the new card via the Asana MCP's `add_comment` (plain text), or `python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/asana_ops.py --post-comment <gid> '<body>...</body>'` for rich HTML — quoting the specific source content. (The Linear equivalent for that system.)
+2. Post a comment on the new card quoting the specific source content — resolve
+   "comment" per `board-surface.md`. On the factory path the comment additionally
+   carries a `Source:` line naming YOU, added by the engine and not suppressible;
+   that is provenance for *who ran the skill*, which is a different fact from the
+   `Source:` line above (*where the requirement came from*). Both belong there.
+   Asana-direct with rich HTML: `python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/asana_ops.py --post-comment <gid> '<body>...</body>'`.
 
 Even when the user says "I just thought of this" — record it: `Source: ad-hoc — user request 2026-04-27`. The trail's value is consistency, not just provenance. **For INBOX cards this rule is non-negotiable** — without source attribution, an INBOX item is just untraced noise.
 
@@ -178,7 +208,8 @@ Attach the well-known label `devhawk:add-card` to the new card. If the label/tag
 | System | How |
 |---|---|
 | **Asana** | Handled automatically by Step 5: `--create-task` stamps the tag when `audit_tag: true` (the default) — it ensures the workspace tag exists, then attaches it. To (re)create the tag standalone, run `python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/asana_ops.py --ensure-audit-tag` (idempotent; prints the gid). The curated MCP can attach an existing tag but cannot create workspace tags, which is why this lives in the script. Cache the gid in `.devhawk-work.json` for reuse. |
-| **Linear** | Issue label. Linear's MCP can create labels directly — call `linear.createIssueLabel({ name: "devhawk:add-card", color: "#0E8A16" })` if missing, then include the label id on creation. |
+| **Linear** | Issue label. Linear's MCP can create labels directly — call its create-issue-label capability for `devhawk:add-card` if missing, then include the label id on creation. |
+| **Through the factory** | Not available — label and tag creation is not on the connector interface, on purpose (it would put board-admin reach into a project-shared credential). Say so once and rely on Marker B, which is what the audit scripts read. |
 
 ### Marker B — description footer (machine-parseable, survives label removal)
 

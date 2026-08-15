@@ -56,6 +56,36 @@ set. This matters because plugins auto-propagate on merge with no staging ring:
 a change here reaches every installed client on the next merge, so the default
 for an unregistered repo has to be "does nothing".
 
+### When there is no repo at all
+
+`factory-detect.mjs` reads a **git remote**. A project manager working a board
+usually has no checkout — so it returns nothing, every step above collapses to
+"not registered", and the whole factory path goes silent with no way for anyone
+to tell why.
+
+So the repo is one way to identify a project, not the only one. Before deciding
+"not registered", check for an explicitly chosen project:
+
+```bash
+cat ~/.devhawk/pm/active-project.json    # {"projectKey": "elevat3"}
+```
+
+Resolution order, and the reasons matter:
+
+1. **`active-project.json`, if present.** An explicit human choice beats
+   inference, always — someone who picked a project meant it, even while sitting
+   in an unrelated directory.
+2. **The git slug**, matched against `repo` in `list_projects`. Right for an
+   engineer in a checkout, where the repo IS the project.
+3. **Neither → not registered.** Unchanged, and still silent.
+
+A board-only project's `repo` is a placeholder (`fraction/<key>-board`) that
+will never match a git slug, which is correct: those projects are reached by
+name, not by inference.
+
+`/factory-connect` (factory-kit) writes that file. Do not write it silently from
+another skill — the point is that a human chose.
+
 ## What you may and may not do
 
 **May, freely — reads.** `next_card`, `project_status`, `get_card`,

@@ -140,6 +140,17 @@ If using wiki markup, no validation. If using ADF, verify the JSON shape matches
 
 ## Step 6: Post the comment
 
+**Resolve the surface first** — `${CLAUDE_PLUGIN_ROOT}/skills/_shared/board-surface.md`.
+
+**Through the factory** (a registered project): the "comment" capability, with
+the project key and the board id. It works on all three systems, uses the
+project's credential rather than yours, and appends a `Source:` line naming you —
+which is the only record of who asked, since the factory posts as a shared
+service account. It posts PLAIN TEXT; if the comment genuinely needs rich HTML
+or an ADF table, use the direct path below and say which you used.
+
+**Direct** (no factory, or a board it does not know):
+
 | System | How |
 |---|---|
 | **Asana** | Prefer our first-party Asana MCP's `add_comment` (plain text). For rich HTML, or if that MCP isn't connected, fall back to `python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/asana_ops.py --post-comment <task_gid> '<html>'`. Never use other Asana MCPs (the official plugin / community / claude.ai connectors are superseded). |
@@ -155,6 +166,10 @@ If the post returns an error:
 ## Step 7: Confirm
 
 Report back:
+- **Which surface you used** — "via the factory" or "directly, as you". They are
+  different events on a client's board: one is attributed to you by the engine
+  and used the project's credential, the other was posted by your own account.
+  The person reading should not have to work out which.
 - Card name + permalink
 - Comment permalink (if the API returns one — Asana's `add_comment` returns a story gid, build the URL)
 - Any mentions that were resolved (so the user can verify the right person was tagged)
