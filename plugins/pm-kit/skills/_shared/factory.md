@@ -79,9 +79,13 @@ Resolution order, and the reasons matter:
    engineer in a checkout, where the repo IS the project.
 3. **Neither → not registered.** Unchanged, and still silent.
 
-A board-only project's `repo` is a placeholder (`fraction/<key>-board`) that
+A board-only project's `repo` is a placeholder — `<owner>/<key>-board` — that
 will never match a git slug, which is correct: those projects are reached by
-name, not by inference.
+name, not by inference. `repo` is required by the schema and is precisely what
+step 2 matches on, so it cannot be blank; the `-board` suffix makes it visibly
+not a real repository. `project_readiness` says so too, as a note rather than a
+warning, because a board-only project is a legitimate shape rather than a
+misconfiguration.
 
 `/factory-connect` (factory-kit) writes that file. Do not write it silently from
 another skill — the point is that a human chose.
