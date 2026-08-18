@@ -7,7 +7,7 @@
     {
       "name": "pm-kit",
       "source": "./plugins/pm-kit",
-      "description": "Claude Code skills for project-board management with Fraction hygiene applied at the point of writing: create a single card correctly (INBOX vs BACKLOG, Feature, standard custom fields, duplicate check, source attribution), post correctly-formatted comments, bootstrap a new Asana project to standard, audit and fix an existing Asana board. Ships a first-party Asana MCP server. Use for \"add a ticket\", \"log a bug\", \"track this\", \"clean up the board\", \"asana hygiene\", \"enrich the backlog\", \"create an Asana project\"."
+      "description": "Claude Code skills for project-board management with Fraction hygiene applied at the point of writing: create a single card correctly (INBOX vs BACKLOG, Feature, standard custom fields, duplicate check, source attribution), post correctly-formatted comments, bootstrap a new Asana project to standard, audit and fix an existing Asana board. Ships a first-party Asana MCP server. Use for \"add a ticket\", \"log a bug\", \"track this\", \"clean up the board\", \"asana hygiene\", \"enrich the backlog\", \"create an Asana project\", \"milestone tracker\", \"build a status tracker\"."
     }
   ]
 }

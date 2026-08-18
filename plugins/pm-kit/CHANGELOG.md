@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- **feat: add `milestone-mapper`.** Generates a standalone, self-contained HTML milestone
+  progress tracker for a client or internal project — Release Notes (what shipped), Gantt
+  progress view, priority roadmap, on-the-radar, and blocked items — pulling from Fireflies
+  transcripts and the project's board (Asana / Jira / Shortcut). Content is confirmed with the
+  operator before HTML is generated; every row carries source attribution per Rule 1.
+
 Initial extraction from `devhawk-seed` as a Claude Code plugin. The five board skills are
 unchanged in substance; what changed is how they are distributed, how they find their runtime,
 and which of the operating rules are enforced rather than merely written down.

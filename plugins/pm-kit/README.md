@@ -56,6 +56,7 @@ would be destroyed by the next `/plugin marketplace update`.
 | `add-comment` | Post a comment in the format each system accepts — Asana's narrow HTML allowlist is validated before the call, so no silent 400 |
 | `asana-bootstrap` | Stand up a new Asana project already compliant: admins, 8 custom fields, 8 sections, metadata, optional EPIC scaffold |
 | `asana-hygiene` | Audit an existing board and fix what can be fixed; report the rest |
+| `milestone-mapper` | Generate a self-contained HTML milestone tracker (release notes, Gantt, priorities, radar, blocked) from Fireflies + board data |
 | `pm-setup` | Build the Python runtime and authenticate — run once after install |
 
 `skills/_shared/` (no `SKILL.md` — not itself a skill) holds the runtime the skills share:
