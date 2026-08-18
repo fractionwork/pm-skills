@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+- **feat: `milestone-mapper`.** Generates a standalone, self-contained HTML milestone
+  tracker — Release Notes, a Gantt, the priority roadmap, what is on the radar and what is
+  blocked — from the project board and, where connected, Fireflies transcripts. Written by
+  Alyssia and previously a project-level skill in her own workspace; promoted here so the
+  team installs it the same way as everything else.
+
+  Ported from `fractionwork/pm-skills#1`, which could not have survived: pm-kit is authored
+  here and MIRRORED to that repo by `pm-kit-publish.yml`, whose own commit message says
+  direct edits there are overwritten. Adapted on the way in — it now resolves the factory
+  vs Asana-direct surface like every other board skill, reads **Asana and Linear** and
+  claims nothing else, groups by the factory's `pm.themes` rather than scraping a custom
+  field, and opens a PR instead of pushing generated output to `main`.
+
 Initial extraction from `devhawk-seed` as a Claude Code plugin. The five board skills are
 unchanged in substance; what changed is how they are distributed, how they find their runtime,
 and which of the operating rules are enforced rather than merely written down.
