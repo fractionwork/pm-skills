@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- **fix: `milestone-mapper` shows points AND tasks.** The old rule — "no tasks column,
+  clients don't care about ticket counts" — was wrong in both directions: tasks and points
+  are both important, to different people. The skill now uses story points as the primary
+  effort metric wherever the board has them (Asana "Story Points" field, Linear estimates,
+  or the factory's view of the same), falls back to task counts when points are
+  unavailable, and shows both when both exist (`42 pts · 24 tickets`) — in the Release
+  Notes badge and any per-track metrics. The headline "delivered this period" stat leads
+  with points as the big number, tickets completed beside it. Source: client feedback via Alyssia, Aug 2026.
+
 - **feat: `milestone-mapper`.** Generates a standalone, self-contained HTML milestone
   tracker — Release Notes, a Gantt, the priority roadmap, what is on the radar and what is
   blocked — from the project board and, where connected, Fireflies transcripts. Written by

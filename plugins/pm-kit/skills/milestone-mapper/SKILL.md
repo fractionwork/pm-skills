@@ -90,6 +90,10 @@ one track.)
 - Map completed tickets to milestone tracks using the Theme custom field (e.g., Theme = "Daily Detail" → Daily Detail track)
 - If no Theme field exists, infer track from ticket title/epic
 - Count total tickets shipped this period — if 20+, surface that count prominently
+- Sum story points for completed work, per track and in total (Asana: the "Story Points"
+  custom field; Linear: the estimate; a factory-registered project exposes points through
+  the factory the same way). Points and task counts matter to different readers — gather
+  both whenever the board has both
 - Identify items that are "on the radar" but not yet scheduled
 
 ---
@@ -110,7 +114,12 @@ Ask: "Does this look right before I write the HTML?"
 **Rules:**
 - Group by Theme custom field value — one card per Theme that had completions this period
 - Each group shows which milestone priority it maps to (`→ Priority N`)
-- If 20+ tickets: show the count prominently (`24 tickets`)
+- Show effort in the section badge: points when the board has them, task count as the
+  fallback, both when both exist (`42 pts · 24 tickets`). If 20+ tickets shipped, always
+  surface the count — it signals momentum
+- The headline "delivered this period" stat leads with **points** as the big number, with
+  tickets completed as a second number beside it (`654` Story Points Delivered · `193`
+  Tickets Completed). Tickets become the lone big number only when the board has no points
 - Exclude tasks with no Theme (platform/infra) unless the client cares
 - For ambiguous items (e.g., something that sounds blocked but isn't), verify before including
 - Add clarifying notes on items that could be misread (e.g., "via manual data feed — no scraper required")
@@ -247,9 +256,11 @@ Today line: `left: [today_pct]%` — red (`#EF5350`), 2px wide, z-index 5.
 </div>
 ```
 
-Ticket count badge on the section title:
+Effort badge on the section title — points first, tasks as fallback, both when both exist:
 ```html
-<span class="rn-count">[N] tickets</span>
+<span class="rn-count">[P] pts · [N] tickets</span>   <!-- both available -->
+<span class="rn-count">[P] pts</span>                  <!-- points only -->
+<span class="rn-count">[N] tickets</span>              <!-- no points on the board -->
 <!-- background: #E8F5E9; color: #2E7D32; -->
 ```
 
@@ -346,10 +357,14 @@ and no commit to undo when the numbers move.
   rules; do not edit the board from here.
 - **Confirm content before writing HTML** — always show the Release Notes draft and get a yes before generating
 - **No external dependencies** — the HTML file must be fully self-contained (no CDN links, no external fonts)
-- **No tasks column in Gantt** — clients don't care about ticket counts; remove if present
+- **Points primary, tasks fallback — show both when both exist** — story points and task
+  counts matter to different readers; neither substitutes for the other. Wherever effort is
+  shown (Release Notes badge, per-track metrics), use points when the board has them, fall
+  back to task counts when it doesn't, and show both when both are available
+  (`18 pts · 7 tasks`). Never drop one in favor of the other when both exist
 - **Theme = milestone track** — if the Asana project has a "Theme" custom field, use Theme values as the canonical track names across all sections (Release Notes, Gantt, priority list). Never invent different names.
 - **Naming consistency** — if a track appears in Release Notes AND the Gantt, use the exact same name in both
-- **Ticket volume matters** — if 20+ tickets shipped, say so prominently; it signals momentum
+- **Volume matters** — if 20+ tickets (or a big points total) shipped, say so prominently; it signals momentum
 - **Clarify ambiguous items** — if a bullet could be misread by the client (e.g., sounds like blocked work but isn't), add a parenthetical
 - **Source attribution on everything** — every priority and Gantt row should carry where it came from
 - **Done items float to top of Gantt** — completed milestones appear first
