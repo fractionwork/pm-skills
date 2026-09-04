@@ -2,6 +2,25 @@
 
 ## Unreleased
 
+- **fix: `/pm-setup` completes on a headless or remote session.** Three faults, one flow. The
+  setup form hung forever: the browser was opened BEFORE `serve_forever`, and since the socket is
+  already bound and listening from the constructor, the request arrived, queued, and was never
+  accepted — because with no `DISPLAY`, `xdg-open` waits on `gio` waits on a portal that never
+  answers, so `webbrowser.open()` never returned. Serving now starts first and opening happens on a
+  daemon thread, so a hung opener is harmless. Both loopback servers moved to
+  `ThreadingHTTPServer`, so a browser's idle preconnect can no longer block the request behind it.
+  And `_PM_HOME` now honours `DEVHAWK_PM_HOME` like `pm-setup.sh:30` always has — while only the
+  shell did, an isolated profile made the two disagree, and setup printed "saved" and then failed
+  on the very next line with "no Asana OAuth app configured". The authorization wait is also no
+  longer a hardcoded 120s (`ASANA_OAUTH_TIMEOUT`, default 600), which is unworkable when the
+  browser is on another machine (`ASANA_OAUTH_TIMEOUT`; the form wait is `ASANA_FORM_TIMEOUT`,
+  default 300). Setting `DEVHAWK_PM_HOME` now also disables the `~/.claude/scripts` fallback, which
+  is shared across profiles — otherwise an isolated profile still resolved its token outside its own
+  home, and `oauth_auth()` writes to that path, so `--reauth` on a work profile would overwrite the
+  personal one. `save_oauth_app` takes a lock: the form serves concurrently now, and a double-click
+  put two read-modify-writes on `workspace.json` at once, dropping `requiredFields`. Found the hard
+  way on a Tailscale SSH session.
+
 - **fix: `milestone-mapper` shows points AND tasks.** The old rule — "no tasks column,
   clients don't care about ticket counts" — was wrong in both directions: tasks and points
   are both important, to different people. The skill now uses story points as the primary

@@ -104,6 +104,18 @@ content-hash addressed and is replaced on every update, which would silently dis
 stored there. A credential left over from the pre-plugin installer at `~/.claude/.asana-token.json`
 is still read, so an existing user does not have to re-authenticate.
 
+**`DEVHAWK_PM_HOME` moves that whole directory** — the venv and the credentials together — for an
+isolated profile (`CLAUDE_CONFIG_DIR=~/.claude-work`, say). Both the setup script and the Python
+honour it, so set it for every invocation or none: a value present for one and not the other splits
+the runtime from the credentials it is meant to read. Setting it also **disables the legacy
+fallback**: `~/.claude/scripts` is shared by every profile on the machine, so a configured home is
+treated as exclusive rather than letting `--reauth` write one profile's token over another's.
+
+**`ASANA_FORM_TIMEOUT`** (default 300) and **`ASANA_OAUTH_TIMEOUT`** (default 600) bound the two
+waits, in seconds — the OAuth app form and the authorization redirect. Raise them when the browser
+is on another machine: a screenshared or port-forwarded session spends most of the window just
+getting the URL in front of a person.
+
 ### Hard rules
 
 - **Never print, echo, or log the token or the client secret**, and never include either in an

@@ -78,8 +78,54 @@ CALLBACK_PORT = 8372
 # old installer passed its own SCRIPTS_DIR through ASANA_TOKEN_FILE when it ran
 # `claude mcp add` (install.sh:523). Getting this wrong silently logs every
 # pre-migration user out, which looks like the plugin being broken.
-_PM_HOME = Path.home() / ".devhawk" / "pm"
+# DEVHAWK_PM_HOME is the directory-level equivalent of the per-file overrides
+# above, and pm-setup.sh:30 already honours it (`${DEVHAWK_PM_HOME:-$HOME/.devhawk/pm}`).
+# When only the shell honoured it, an isolated profile made the two disagree:
+# Python saved the OAuth app to ~/.devhawk/pm while the shell verified the
+# configured home, so setup printed "saved" and then failed on the very next
+# line with "no Asana OAuth app configured".
+_PM_HOME_EXPLICIT = bool(os.environ.get("DEVHAWK_PM_HOME"))
+_PM_HOME = (
+    Path(os.environ["DEVHAWK_PM_HOME"]).expanduser()
+    if _PM_HOME_EXPLICIT
+    else Path.home() / ".devhawk" / "pm"
+)
 _LEGACY_HOME = Path.home() / ".claude" / "scripts"
+
+
+def _open_browser(url: str) -> None:
+    """Open `url` without ever blocking the caller.
+
+    The opener is not reliable everywhere and is not required to be: it is a
+    convenience on top of the URL we always print. On a headless or SSH session
+    xdg-open can hang indefinitely, so it must never sit between the user and a
+    server that is ready to serve them.
+    """
+    threading.Thread(target=webbrowser.open, args=(url,), daemon=True).start()
+
+
+def _env_seconds(var: str, default: int) -> int:
+    """A timeout in seconds, overridable from the environment.
+
+    Both waits in the setup flow are bounded by how long it takes to get a URL
+    in front of a human, which is not a property of this machine: a screenshared
+    or port-forwarded session is far slower than a local browser. A malformed
+    value falls back to the default rather than failing the flow over it.
+    """
+    try:
+        return max(1, int(os.environ.get(var, str(default))))
+    except ValueError:
+        return default
+
+
+def _form_timeout() -> int:
+    """Seconds to wait for the OAuth app form. Was a hardcoded 300."""
+    return _env_seconds("ASANA_FORM_TIMEOUT", 300)
+
+
+def _oauth_timeout() -> int:
+    """Seconds to wait for the authorization redirect. Was a hardcoded 120."""
+    return _env_seconds("ASANA_OAUTH_TIMEOUT", 600)
 
 
 def _write_private(path: Path, text: str) -> None:
@@ -104,9 +150,16 @@ def _cred_path(env_var: str, filename: str) -> Path:
     current = _PM_HOME / filename
     if current.exists():
         return current
-    legacy = _LEGACY_HOME / f".{filename}"
-    if legacy.exists():
-        return legacy
+    # The legacy path is only ever a fallback for the DEFAULT home. Setting
+    # DEVHAWK_PM_HOME is a deliberate statement about where this profile's
+    # credentials live, and ~/.claude/scripts is shared with every other
+    # profile on the machine — falling back to it would let `--reauth` write
+    # an isolated profile's fresh token straight over the personal one, which
+    # is the opposite of what an isolated home is for.
+    if not _PM_HOME_EXPLICIT:
+        legacy = _LEGACY_HOME / f".{filename}"
+        if legacy.exists():
+            return legacy
     return current
 
 
@@ -237,6 +290,14 @@ CONFIG_DONE = """<!doctype html>
 """
 
 
+# The config form serves concurrently, so two Submits (a double-click is
+# enough) can land in save_oauth_app at once. It is a read-modify-write onto a
+# file that also carries requiredFields/requiredAdmins, and _write_private
+# truncates — without this lock the second reader can see the truncated file,
+# fall into its `except ValueError: cfg = {}` branch, and drop those blocks.
+_WS_WRITE_LOCK = threading.Lock()
+
+
 def save_oauth_app(client_id: str, client_secret: str) -> None:
     """Merge the OAuth app into workspace.json without disturbing other blocks.
 
@@ -245,18 +306,19 @@ def save_oauth_app(client_id: str, client_secret: str) -> None:
     should not lose them by re-running setup.
     """
     global _WS_CACHE
-    try:
-        cfg = json.loads(WORKSPACE_CONFIG.read_text())
-    except (OSError, ValueError):
-        cfg = {}
-    cfg.setdefault("oauth", {})
-    cfg["oauth"]["clientId"] = client_id
-    cfg["oauth"]["clientSecret"] = client_secret
-    _write_private(WORKSPACE_CONFIG, json.dumps(cfg, indent=2) + "\n")
-    _WS_CACHE = None  # force reload; the flow reads the app back immediately
+    with _WS_WRITE_LOCK:
+        try:
+            cfg = json.loads(WORKSPACE_CONFIG.read_text())
+        except (OSError, ValueError):
+            cfg = {}
+        cfg.setdefault("oauth", {})
+        cfg["oauth"]["clientId"] = client_id
+        cfg["oauth"]["clientSecret"] = client_secret
+        _write_private(WORKSPACE_CONFIG, json.dumps(cfg, indent=2) + "\n")
+        _WS_CACHE = None  # force reload; the flow reads the app back immediately
 
 
-def configure_app_via_browser(timeout: int = 300) -> bool:
+def configure_app_via_browser(timeout: int | None = None) -> bool:
     """Collect the OAuth app through a loopback form. Returns True if saved.
 
     WHY THIS EXISTS: /pm-setup is normally run from inside Claude Code, whose
@@ -269,6 +331,8 @@ def configure_app_via_browser(timeout: int = 300) -> bool:
     output. Typed into a page served on loopback, it goes browser -> this
     process -> 0600 file and appears nowhere else.
     """
+    if timeout is None:
+        timeout = _form_timeout()
     token = secrets.token_urlsafe(32)
     url = f"http://localhost:{CALLBACK_PORT}/configure?t={token}"
     saved = [False]
@@ -325,7 +389,7 @@ def configure_app_via_browser(timeout: int = 300) -> bool:
             pass
 
     try:
-        server = http.server.HTTPServer(("localhost", CALLBACK_PORT), ConfigHandler)
+        server = http.server.ThreadingHTTPServer(("localhost", CALLBACK_PORT), ConfigHandler)
     except OSError as e:
         print(f"Could not open the setup form on localhost:{CALLBACK_PORT}: {e}",
               file=sys.stderr)
@@ -340,13 +404,20 @@ def configure_app_via_browser(timeout: int = 300) -> bool:
     if os.environ.get("WSL_DISTRO_NAME") or os.environ.get("WSL_INTEROP"):
         print("  WSL: if the page won't load, open that address in Windows directly.")
         print()
-    webbrowser.open(url)
-
     # serve_forever rather than one handle_request: the browser makes several
     # requests here (the form, a favicon, then the POST, plus any correction
     # round-trip after a validation error).
+    #
+    # Serving starts BEFORE the browser is opened, and opening happens off the
+    # main thread. The constructor has already bound and listened, so a request
+    # can arrive the instant the URL is known — but nothing accepts it until
+    # serve_forever runs. Opening first stranded the form on any host where the
+    # opener blocks: with no DISPLAY, xdg-open waits on gio, which waits on a
+    # portal that never answers, so webbrowser.open() never returned and the
+    # page just spun. A daemon thread lets that hang be harmless.
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
+    _open_browser(url)
     deadline = time.time() + timeout
     while not saved[0] and time.time() < deadline:
         time.sleep(0.2)
@@ -354,7 +425,7 @@ def configure_app_via_browser(timeout: int = 300) -> bool:
     server.server_close()
 
     if not saved[0]:
-        print(f"Timed out after {timeout // 60} minutes waiting for the form.",
+        print(f"Timed out after {timeout}s waiting for the form.",
               file=sys.stderr)
         return False
     print("Saved to", WORKSPACE_CONFIG)
@@ -443,7 +514,7 @@ def oauth_auth():
         def log_message(self, *args):
             pass  # suppress server logs
 
-    server = http.server.HTTPServer(("localhost", CALLBACK_PORT), CallbackHandler)
+    server = http.server.ThreadingHTTPServer(("localhost", CALLBACK_PORT), CallbackHandler)
     # serve_forever, not a single handle_request — the same lesson the config
     # form above already learned. One handled request means the FIRST thing to
     # touch the port decides the outcome, and a browser rarely sends the
@@ -458,15 +529,15 @@ def oauth_auth():
         # relays localhost to WSL, but not on every setup — mirrored networking,
         # a firewall rule, or something already holding the port all break it,
         # and the failure looks like the browser hanging on "can't reach this
-        # page". Say this BEFORE the 2-minute wait, because the recovery needs
+        # page". Say this BEFORE the wait starts, because the recovery needs
         # the URL from that failed page and the listener is gone afterwards.
         print("  WSL: if the browser lands on 'can't reach this page' after you approve,")
         print("  copy its full address and finish the handshake from inside WSL:")
         print(f"      curl \"http://localhost:{CALLBACK_PORT}/callback?code=...&state=...\"")
         print()
-    webbrowser.open(auth_url)
+    _open_browser(auth_url)
 
-    deadline = time.time() + 120
+    deadline = time.time() + _oauth_timeout()
     while auth_code[0] is None and auth_error[0] is None and time.time() < deadline:
         time.sleep(0.2)
     server.shutdown()
@@ -476,7 +547,7 @@ def oauth_auth():
         print(f"Auth error: {auth_error[0]}")
         sys.exit(1)
     if not auth_code[0]:
-        print("Timed out waiting for authorization (2 min).", file=sys.stderr)
+        print(f"Timed out waiting for authorization ({_oauth_timeout()}s).", file=sys.stderr)
         if os.environ.get("WSL_DISTRO_NAME") or os.environ.get("WSL_INTEROP"):
             print("  On WSL this usually means Windows didn't relay localhost:"
                   f"{CALLBACK_PORT} into the distro.", file=sys.stderr)
