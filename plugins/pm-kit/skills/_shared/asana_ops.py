@@ -18,6 +18,7 @@ import base64
 import hashlib
 import http.server
 import json
+import mimetypes
 import os
 import re
 import secrets
@@ -771,15 +772,44 @@ def paginate(path, params=None, opt_fields=None):
 # 100 MB — Asana's hard cap on a single attachment upload.
 ATTACHMENT_MAX_BYTES = 100 * 1024 * 1024
 
+# Container types for the encodings mimetypes reports separately from the type.
+# RFC 6713 for gzip; the x- names are what browsers and Asana actually match on.
+ENCODING_MIMETYPES = {
+    "gzip": "application/gzip",
+    "bzip2": "application/x-bzip2",
+    "xz": "application/x-xz",
+    "compress": "application/x-compress",
+    "br": "application/x-brotli",
+}
+
+
+def guess_mimetype(filename):
+    """The media type to send as the multipart file part's Content-Type.
+
+    Asana believes this header, so a wrong answer is worse than a vague one —
+    it is what makes the browser try to render bytes it cannot render.
+
+    `guess_type` splits a name like `report.csv.gz` into a TYPE (`text/csv`)
+    and an ENCODING (`gzip`), and the type describes the DECODED stream, not
+    the bytes we are about to upload. Sending `text/csv` for gzipped bytes
+    reproduces the exact bug this function exists to fix, so when there is an
+    encoding the container type wins and the inner type is discarded.
+    """
+    mimetype, encoding = mimetypes.guess_type(filename)
+    if encoding:
+        return ENCODING_MIMETYPES.get(encoding, "application/octet-stream")
+    return mimetype or "application/octet-stream"
+
 
 def attach_file(task_gid, file_path, dry_run=False):
     """Upload a local file as an attachment on a task.
 
     POST /attachments is multipart/form-data, not JSON — the shared api()
     helper sends JSON and would be rejected here, so this does its own
-    request and lets `requests` set the multipart boundary (never set
-    Content-Type by hand or the boundary is lost). Fills the MCP gap: the
-    Asana MCP can't upload a local file.
+    request and lets `requests` set the multipart boundary (never set the
+    REQUEST's Content-Type by hand or the boundary is lost — the file PART's
+    Content-Type is a separate thing and must be set, see guess_mimetype).
+    Fills the MCP gap: the Asana MCP can't upload a local file.
     """
     global ERRORS
     path = Path(file_path)
@@ -802,7 +832,7 @@ def attach_file(task_gid, file_path, dry_run=False):
             f"{BASE}/attachments",
             headers={"Authorization": f"Bearer {token}"},
             data={"parent": task_gid},
-            files={"file": (path.name, fh)},
+            files={"file": (path.name, fh, guess_mimetype(path.name))},
             timeout=UPLOAD_TIMEOUT,
         )
 

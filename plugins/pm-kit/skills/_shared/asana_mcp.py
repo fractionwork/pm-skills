@@ -272,6 +272,23 @@ def run_hygiene(project_gid: str, dry_run: bool = True):
     return buf.getvalue()
 
 
+def _story_payload(body: str) -> dict:
+    """Pick the Asana story field that renders `body` as written.
+
+    Asana has two: `text` is plain and `html_text` is rich. Posting rich
+    markup through `text` does not fail — Asana stores the tags verbatim and
+    escapes them on the way out, so the card shows a wall of `<p>` and
+    `<strong>` to whoever reads it. It is a formatting bug that only the
+    client sees, and it leaves no error behind for us.
+
+    The `<body>` wrapper is the skill's contract for rich text (see the
+    add-comment skill and --post-comment), so it is what tells the two apart.
+    Anything else is plain text and stays plain text: a comment that merely
+    mentions `a < b` must not be reinterpreted as markup.
+    """
+    return {"html_text": body} if body.strip().startswith("<body>") else {"text": body}
+
+
 def _record_attribution(task_gid: str, note: str) -> bool:
     """Post the Rule-1 audit comment for a state change. Best-effort.
 
@@ -281,7 +298,8 @@ def _record_attribution(task_gid: str, note: str) -> bool:
     """
     try:
         with contextlib.redirect_stdout(sys.stderr):
-            return bool(ops.api("POST", f"/tasks/{task_gid}/stories", {"text": note}))
+            return bool(ops.api("POST", f"/tasks/{task_gid}/stories",
+                                _story_payload(note)))
     except Exception as e:  # noqa: BLE001 — deliberately broad, see docstring
         print(f"asana-mcp: attribution comment failed for {task_gid}: {e}",
               file=sys.stderr)
@@ -290,8 +308,14 @@ def _record_attribution(task_gid: str, note: str) -> bool:
 
 @mcp.tool()
 def add_comment(task_gid: str, body: str):
-    """Add a plain-text comment to a task (scoped). Plain text avoids Asana's
-    HTML allowlist 400s; use the add-comment skill for rich formatting.
+    """Add a comment to a task (scoped).
+
+    Plain text by default — that avoids Asana's HTML allowlist 400s. A body
+    wrapped in `<body>...</body>` is posted as rich text instead, because that
+    wrapper is the add-comment skill's contract for formatted output and
+    sending it as plain text renders the raw tags on the card. Use the
+    add-comment skill to produce the HTML: it strips to Asana's allowlist,
+    which this does not do.
 
     Takes no `source`: a comment IS the audit trail Rule 1 asks for, so
     requiring attribution to leave attribution would just be circular."""
@@ -299,7 +323,7 @@ def add_comment(task_gid: str, body: str):
     _assert_task_in_scope(task_gid)
     params = {"silent": "true"} if _bulk_silent() else None
     with contextlib.redirect_stdout(sys.stderr):
-        r = ops.api("POST", f"/tasks/{task_gid}/stories", {"text": body},
+        r = ops.api("POST", f"/tasks/{task_gid}/stories", _story_payload(body),
                     params=params)
     return "ok" if r else "failed"
 
