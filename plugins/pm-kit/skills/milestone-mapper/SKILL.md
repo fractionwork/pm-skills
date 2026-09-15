@@ -23,7 +23,7 @@ description: >
 
 Generate a standalone HTML milestone tracker — a client-facing or internal status page that tells the story: **what shipped → where we are → where we're going → what's blocked**.
 
-The output is a single self-contained HTML file. No external dependencies. Served locally via `python3 -m http.server 8080` or pushed to a GitHub repo.
+The output is a single self-contained HTML file. No external dependencies. Served locally via `node ${CLAUDE_PLUGIN_ROOT}/skills/_shared/pm-python.mjs -m http.server 8080` or pushed to a GitHub repo.
 
 ---
 

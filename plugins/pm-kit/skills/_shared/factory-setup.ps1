@@ -164,7 +164,7 @@ function Get-KitWindowsStatus {
     'pykit'       { @{ State = 'degraded'; Note = 'the scaffold it generates drives its gates through make, which Windows lacks' } }
     'ship-kit'    { @{ State = 'degraded'; Note = 'pr-watch, card-done, create-pr and security-brief need jq; Python repos need make' } }
     'audit-kit'   { @{ State = 'degraded'; Note = 'scanners install by hand - /audit-install-scanners has no Windows path yet' } }
-    'pm-kit'      { @{ State = 'degraded'; Note = 'the Asana MCP server and Asana-direct skills do not run yet - use /factory-connect' } }
+    'pm-kit'      { @{ State = 'ok';       Note = '' } }
     default       { @{ State = 'ok';       Note = '' } }
   }
 }

@@ -34,7 +34,7 @@ Workspace-scoped tags (one set, shared across all projects). Currently one:
 
 | Tag | Purpose | Setup |
 |---|---|---|
-| `devhawk:add-card` | Audit marker — every card created by the `add-card` skill carries this tag so skill-created vs manually-created cards are filterable in saved views. Paired with a `Created-By: devhawk-add-card@v<n>` line in the description for machine-readable audits. | `python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/asana_ops.py --ensure-audit-tag` (idempotent, prints tag gid). One-shot per workspace. |
+| `devhawk:add-card` | Audit marker — every card created by the `add-card` skill carries this tag so skill-created vs manually-created cards are filterable in saved views. Paired with a `Created-By: devhawk-add-card@v<n>` line in the description for machine-readable audits. | `node ${CLAUDE_PLUGIN_ROOT}/skills/_shared/pm-python.mjs asana_ops.py --ensure-audit-tag` (idempotent, prints tag gid). One-shot per workspace. |
 
 The audit tag is **not** project-attached at the field-settings level — Asana tags are workspace-global and any task can carry any tag. The `--ensure-audit-tag` flag exists because the Asana MCP can attach existing tags but cannot create new ones; running this once per workspace lets the MCP path do all subsequent per-card stamping.
 
@@ -126,7 +126,7 @@ The Release enum field tags every task with its phase/release. This enables filt
 - **Set during bootstrap:** new projects default to "Phase 1" for all initial tasks
 - **New phases:** `create_new_phase` auto-creates a new enum option and tags tasks
 - **Manual override:** builders can set Release directly on any task
-- **Add options:** `python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/asana_ops.py --add-release-option "Phase 5"`
+- **Add options:** `node ${CLAUDE_PLUGIN_ROOT}/skills/_shared/pm-python.mjs asana_ops.py --add-release-option "Phase 5"`
 
 Current enum options: Phase 1 (blue), Phase 2 (green), Phase 3 (orange), Phase 4 (purple). Add more as needed.
 
@@ -135,7 +135,7 @@ Current enum options: Phase 1 (blue), Phase 2 (green), Phase 3 (orange), Phase 4
 The Sprint **multi_enum** field tags tasks with their time-boxed iteration. Multi-select means a task carrying over from one sprint to the next can hold both tags — useful for velocity reporting on continuing work.
 
 - **Naming convention**: `Sprint M/D-M/D` (e.g. `Sprint 4/7-4/14`). Dates are unambiguous; year is omitted to match the existing convention. The Jira label "Sprint 0" / "Sprint 1" is dropped on migration since dates uniquely identify the sprint.
-- **Open a new sprint**: `python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/asana_ops.py --add-sprint-option "Sprint 4/14-4/21"`
+- **Open a new sprint**: `node ${CLAUDE_PLUGIN_ROOT}/skills/_shared/pm-python.mjs asana_ops.py --add-sprint-option "Sprint 4/14-4/21"`
 - **Closed sprints stay**: don't delete past options — historical filtering matters.
 - **Active-sprint view**: saved Asana view filtered `Sprint = Sprint M/D-M/D`, board layout by Section.
 - **Sprint vs Release**: Release is a phase/launch arc (months); Sprint is an iteration (1-2 weeks). Orthogonal — every task can have both.
@@ -167,7 +167,7 @@ Promoting a subtask to a top-level task is **non-destructive** — the task keep
 2. **Detach from the parent** (else it lingers in a confusing dual state — both subtask and top-level):
    `POST /tasks/{gid}/setParent` → `{ "parent": null }`
 
-Order is load-bearing: reverse it and the task briefly belongs to nothing. After both calls, set `Feature` (and `Theme`) from the former parent, then assert `parent == null`. Section routing: completed children → DONE; open children → the parent's section if it's an active flow section, else BACKLOG. Tooling: `python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/asana_ops.py --elevate-subtasks <PROJECT_GID>` (idempotent; also fixes the dual state where step 1 ran but step 2 didn't).
+Order is load-bearing: reverse it and the task briefly belongs to nothing. After both calls, set `Feature` (and `Theme`) from the former parent, then assert `parent == null`. Section routing: completed children → DONE; open children → the parent's section if it's an active flow section, else BACKLOG. Tooling: `node ${CLAUDE_PLUGIN_ROOT}/skills/_shared/pm-python.mjs asana_ops.py --elevate-subtasks <PROJECT_GID>` (idempotent; also fixes the dual state where step 1 ran but step 2 didn't).
 
 ## Portfolio organization
 
@@ -242,23 +242,23 @@ first for ergonomics, then fall back to the script on any failure.
 
 | Need | Command |
 |---|---|
-| One-time / refresh auth | `python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/asana_ops.py --auth` |
-| Print a bearer token (for curl/other tools) | `python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/asana_ops.py --token` |
-| Full hygiene audit + fix | `python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/asana_ops.py --hygiene <PROJECT_GID>` |
-| Auto-estimate story points | `python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/asana_ops.py --estimate <PROJECT_GID>` |
-| Move a task to a section | `python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/asana_ops.py --move-section <TASK_GID> <SECTION_GID>` |
-| Post a comment (HTML or `-` for stdin) | `python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/asana_ops.py --post-comment <TASK_GID> '<body>…</body>'` |
-| Create a rich task (add-card) | `python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/asana_ops.py --create-task '{"name":…,"projects":[…],"section":"BACKLOG","custom_fields":{…},"sprint":[…],"audit_tag":true}'` |
-| Complete a task (card-done) | `python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/asana_ops.py --complete-task <TASK_GID>` |
-| Find a user by name/email (mentions) | `python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/asana_ops.py --find-user "<query>"` |
-| Create a project (bootstrap; `--dry-run` to preview) | `python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/asana_ops.py --create-project '{"name":…,"team":…,"notes":…,"default_view":"board"}'` |
-| Attach a local file | `python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/asana_ops.py --attach-file <TASK_GID> <FILE_PATH>` |
-| Elevate subtasks → top-level (flat-model fix) | `python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/asana_ops.py --elevate-subtasks <PROJECT_GID>` |
-| New phase (Feature group) | `python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/asana_ops.py --new-phase <PROJECT_GID> "<PHASE_NAME>"` |
-| Add Release enum option | `python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/asana_ops.py --add-release-option "Phase 5"` |
-| Add Sprint enum option | `python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/asana_ops.py --add-sprint-option "Sprint 4/14-4/21"` |
-| Ensure audit tag exists | `python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/asana_ops.py --ensure-audit-tag` |
-| Cleanup tracks (A–E) | `python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/asana_ops.py --track <A\|B\|C\|D\|E\|all> [--dry-run]` |
+| One-time / refresh auth | `node ${CLAUDE_PLUGIN_ROOT}/skills/_shared/pm-python.mjs asana_ops.py --auth` |
+| Print a bearer token (for curl/other tools) | `node ${CLAUDE_PLUGIN_ROOT}/skills/_shared/pm-python.mjs asana_ops.py --token` |
+| Full hygiene audit + fix | `node ${CLAUDE_PLUGIN_ROOT}/skills/_shared/pm-python.mjs asana_ops.py --hygiene <PROJECT_GID>` |
+| Auto-estimate story points | `node ${CLAUDE_PLUGIN_ROOT}/skills/_shared/pm-python.mjs asana_ops.py --estimate <PROJECT_GID>` |
+| Move a task to a section | `node ${CLAUDE_PLUGIN_ROOT}/skills/_shared/pm-python.mjs asana_ops.py --move-section <TASK_GID> <SECTION_GID>` |
+| Post a comment (HTML or `-` for stdin) | `node ${CLAUDE_PLUGIN_ROOT}/skills/_shared/pm-python.mjs asana_ops.py --post-comment <TASK_GID> '<body>…</body>'` |
+| Create a rich task (add-card) | `node ${CLAUDE_PLUGIN_ROOT}/skills/_shared/pm-python.mjs asana_ops.py --create-task '{"name":…,"projects":[…],"section":"BACKLOG","custom_fields":{…},"sprint":[…],"audit_tag":true}'` |
+| Complete a task (card-done) | `node ${CLAUDE_PLUGIN_ROOT}/skills/_shared/pm-python.mjs asana_ops.py --complete-task <TASK_GID>` |
+| Find a user by name/email (mentions) | `node ${CLAUDE_PLUGIN_ROOT}/skills/_shared/pm-python.mjs asana_ops.py --find-user "<query>"` |
+| Create a project (bootstrap; `--dry-run` to preview) | `node ${CLAUDE_PLUGIN_ROOT}/skills/_shared/pm-python.mjs asana_ops.py --create-project '{"name":…,"team":…,"notes":…,"default_view":"board"}'` |
+| Attach a local file | `node ${CLAUDE_PLUGIN_ROOT}/skills/_shared/pm-python.mjs asana_ops.py --attach-file <TASK_GID> <FILE_PATH>` |
+| Elevate subtasks → top-level (flat-model fix) | `node ${CLAUDE_PLUGIN_ROOT}/skills/_shared/pm-python.mjs asana_ops.py --elevate-subtasks <PROJECT_GID>` |
+| New phase (Feature group) | `node ${CLAUDE_PLUGIN_ROOT}/skills/_shared/pm-python.mjs asana_ops.py --new-phase <PROJECT_GID> "<PHASE_NAME>"` |
+| Add Release enum option | `node ${CLAUDE_PLUGIN_ROOT}/skills/_shared/pm-python.mjs asana_ops.py --add-release-option "Phase 5"` |
+| Add Sprint enum option | `node ${CLAUDE_PLUGIN_ROOT}/skills/_shared/pm-python.mjs asana_ops.py --add-sprint-option "Sprint 4/14-4/21"` |
+| Ensure audit tag exists | `node ${CLAUDE_PLUGIN_ROOT}/skills/_shared/pm-python.mjs asana_ops.py --ensure-audit-tag` |
+| Cleanup tracks (A–E) | `node ${CLAUDE_PLUGIN_ROOT}/skills/_shared/pm-python.mjs asana_ops.py --track <A\|B\|C\|D\|E\|all> [--dry-run]` |
 
 Most write paths accept `--dry-run`. For the underlying REST surface not exposed
 as a flag, the script's `api(method, path, data=, params=)` helper (and the
@@ -278,7 +278,7 @@ control the exact tool set (no raw `create_task`/`delete`); and project access
 is fenced server-side regardless of what the credential can otherwise see.
 
 **Auth — OAuth *or* PAT, per user** (resolved by `asana_ops.get_token()`):
-- *OAuth user:* `python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/asana_ops.py --auth` once, then point
+- *OAuth user:* `node ${CLAUDE_PLUGIN_ROOT}/skills/_shared/pm-python.mjs asana_ops.py --auth` once, then point
   `ASANA_TOKEN_FILE` at the resulting token store (auto-refreshes).
 - *PAT user:* set `ASANA_ACCESS_TOKEN` (or `ASANA_PAT`) in the MCP config.
 
@@ -300,10 +300,10 @@ workspace if there's only one → otherwise it refuses to start and tells the us
 to pick. Pick once (both the CLI and the MCP reuse it):
 
 ```bash
-python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/asana_ops.py --list-workspaces      # see gid + name
-python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/asana_ops.py --set-workspace <gid>  # save the choice
-python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/asana_ops.py --pick-workspace       # or choose interactively
-python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/asana_ops.py --list-projects        # projects in the active workspace (gid + name)
+node ${CLAUDE_PLUGIN_ROOT}/skills/_shared/pm-python.mjs asana_ops.py --list-workspaces      # see gid + name
+node ${CLAUDE_PLUGIN_ROOT}/skills/_shared/pm-python.mjs asana_ops.py --set-workspace <gid>  # save the choice
+node ${CLAUDE_PLUGIN_ROOT}/skills/_shared/pm-python.mjs asana_ops.py --pick-workspace       # or choose interactively
+node ${CLAUDE_PLUGIN_ROOT}/skills/_shared/pm-python.mjs asana_ops.py --list-projects        # projects in the active workspace (gid + name)
 ```
 
 `--list-projects` exists so Claude can show projects **by name** and let the user
@@ -317,21 +317,25 @@ Per-project tools (`get_task`, `assign_task`, `move_task_to_section`,
 
 **Install:** `pip install -r scripts/requirements-mcp.txt`
 
+These register the server BY HAND, outside the plugin, so `<pm-kit>` is the plugin's
+installed path. `node` rather than `python3`: the launcher finds the right interpreter,
+including on native Windows.
+
 **Config — guest, PAT, read-only, one project:**
 ```bash
 claude mcp add asana \
   -e ASANA_ACCESS_TOKEN=<GUEST_PAT> \
   -e ASANA_ALLOWED_PROJECTS=<PROJECT_GID> \
   -e ASANA_READ_ONLY=1 \
-  -- python3 /abs/path/scripts/asana_mcp.py
+  -- node <pm-kit>/skills/_shared/pm-python.mjs asana_mcp.py
 ```
 
 **Config — full user, OAuth, writes allowed:**
 ```bash
-python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/asana_ops.py --auth          # one-time browser login
+node <pm-kit>/skills/_shared/pm-python.mjs asana_ops.py --auth          # one-time browser login
 claude mcp add asana \
   -e ASANA_TOKEN_FILE=$HOME/.config/asana-mcp/token.json \
-  -- python3 /abs/path/scripts/asana_mcp.py
+  -- node <pm-kit>/skills/_shared/pm-python.mjs asana_mcp.py
 ```
 
 **Tool surface (curated):**

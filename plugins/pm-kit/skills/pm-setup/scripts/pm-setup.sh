@@ -27,9 +27,32 @@
 
 set -uo pipefail
 
-PM_HOME="${DEVHAWK_PM_HOME:-$HOME/.devhawk/pm}"
+# ── native Windows (Git Bash) ───────────────────────────────────────────────
+# Four things differ there, and each one broke setup:
+#   * a venv's interpreter is Scripts\python.exe, not bin/python — setup built a
+#     venv and then could never find it;
+#   * Python resolves ~ from USERPROFILE, not the $HOME Git Bash sets, so the two
+#     sides could disagree about where ~/.devhawk/pm is;
+#   * Python decodes files and writes stdout as cp1252 unless told otherwise;
+#   * a POSIX path embedded INSIDE `-c` code is not converted for Windows Python
+#     the way a whole argument is (see native_path).
+IS_WINDOWS=0
+case "$(uname -s)" in MINGW*|MSYS*|CYGWIN*) IS_WINDOWS=1 ;; esac
+export PYTHONUTF8=1
+
+if [ -z "${DEVHAWK_PM_HOME:-}" ] && [ "$IS_WINDOWS" = 1 ] && [ -n "${USERPROFILE:-}" ] \
+   && command -v cygpath >/dev/null 2>&1; then
+  PM_HOME="$(cygpath -u "$USERPROFILE")/.devhawk/pm"
+else
+  PM_HOME="${DEVHAWK_PM_HOME:-$HOME/.devhawk/pm}"
+fi
 VENV="$PM_HOME/venv"
-VENV_PY="$VENV/bin/python"
+if [ "$IS_WINDOWS" = 1 ]; then VENV_PY="$VENV/Scripts/python.exe"; else VENV_PY="$VENV/bin/python"; fi
+
+native_path() {
+  if [ "$IS_WINDOWS" = 1 ] && command -v cygpath >/dev/null 2>&1; then cygpath -w "$1"
+  else printf '%s' "$1"; fi
+}
 
 # Resolve this script's directory, following symlinks, without `readlink -f`
 # (GNU-only — absent on stock macOS). Same idiom audit-kit uses.
@@ -85,7 +108,7 @@ find_python() {
 # start the server while Claude Code showed no Asana tools at all.
 deps_present() {
   [ -x "$VENV_PY" ] \
-    && "$VENV_PY" -c "import sys; sys.path.insert(0, r'$SHARED'); import asana_mcp" >/dev/null 2>&1
+    && "$VENV_PY" -c "import sys; sys.path.insert(0, r'$(native_path "$SHARED")'); import asana_mcp" >/dev/null 2>&1
 }
 
 # Legacy path is ~/.claude/scripts/, where the old installer pointed
@@ -98,9 +121,10 @@ WS_CONFIG="$PM_HOME/workspace.json"
 # the venv exists. Pointing at $VENV_PY there makes the probe fail silently and
 # report a configured app as missing.
 cfg_py() {
-  if [ -x "$VENV_PY" ]; then echo "$VENV_PY"
-  elif command -v python3 >/dev/null 2>&1; then echo python3
-  else echo python; fi
+  if [ -x "$VENV_PY" ]; then echo "$VENV_PY"; return; fi
+  # Not a bare `command -v python3`: on Windows that finds the Microsoft Store
+  # stub, which runs nothing. find_python only accepts one that executes.
+  find_python || echo python
 }
 
 # Is an OAuth app available? The flag/env wins, else workspace.json must carry
@@ -180,7 +204,8 @@ else
   BASE_PY="$(find_python)" || {
     bad "no Python >= 3.10 found on PATH."
     echo "     Install one (macOS: brew install python@3.12 · Debian/Ubuntu:" >&2
-    echo "     sudo apt install python3.12-venv) and re-run /pm-setup." >&2
+    echo "     sudo apt install python3.12-venv · Windows: winget install Python.Python.3.13)" >&2
+    echo "     and re-run /pm-setup." >&2
     exit 1
   }
   echo "  using $BASE_PY ($("$BASE_PY" -V 2>&1))"
@@ -240,7 +265,9 @@ else
         ;;
     esac
 
-    if [ -z "${BROWSER:-}" ] && [ -x "$SHARED/open-url.sh" ]; then
+    # Not on native Windows: Python's webbrowser opens the default browser there
+    # by itself, and a .sh in $BROWSER is something it cannot execute at all.
+    if [ "$IS_WINDOWS" = 0 ] && [ -z "${BROWSER:-}" ] && [ -x "$SHARED/open-url.sh" ]; then
       export BROWSER="$SHARED/open-url.sh"
       [ -n "${WSL_DISTRO_NAME:-}${WSL_INTEROP:-}" ] \
         && say "using $SHARED/open-url.sh to open the browser (WSL)"

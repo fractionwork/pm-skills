@@ -30,6 +30,21 @@ run() {
 
 is_wsl() { [ -n "${WSL_DISTRO_NAME:-}${WSL_INTEROP:-}" ]; }
 
+# Overridable so the native-Windows branch can be tested from any machine.
+UNAME_S="${OPEN_URL_UNAME:-$(uname -s)}"
+
+# Git Bash on NATIVE Windows reports MINGW/MSYS, and before this branch fell
+# through to `xdg-open`, which does not exist there — so /pm-setup's OAuth and
+# config form could not open a browser at all. `start` is a cmd builtin, so it
+# goes through cmd.exe: `//c` stops MSYS rewriting `/c` as a path, and the empty
+# "" is start's window title — without it a quoted URL is taken AS the title.
+case "$UNAME_S" in
+  MINGW*|MSYS*|CYGWIN*)
+    run cmd.exe //c start "" "$url"
+    exit 0
+    ;;
+esac
+
 if is_wsl; then
   # Purpose-built and handles quoting for us.
   if command -v wslview >/dev/null 2>&1; then
@@ -62,7 +77,7 @@ if is_wsl; then
   fi
 fi
 
-case "$(uname -s)" in
+case "$UNAME_S" in
   Darwin) command -v open >/dev/null 2>&1 && { run open "$url"; exit $?; } ;;
   *)      command -v xdg-open >/dev/null 2>&1 && { run xdg-open "$url"; exit $?; } ;;
 esac

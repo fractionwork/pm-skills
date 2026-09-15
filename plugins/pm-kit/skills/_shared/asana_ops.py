@@ -708,7 +708,9 @@ def log(method, url, status, gid=""):
     line = f"{ts} {method:6s} {url} → {status} {gid}"
     print(f"  {line}")
     LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
-    with open(LOG_FILE, "a") as f:
+    # utf-8 explicitly: the line carries `→`, and Windows' default encoding for
+    # open() is cp1252, which cannot write it.
+    with open(LOG_FILE, "a", encoding="utf-8") as f:
         f.write(line + "\n")
 
 
@@ -782,6 +784,23 @@ ENCODING_MIMETYPES = {
     "br": "application/x-brotli",
 }
 
+# The type table, built ONCE from Python's own defaults and never the host's.
+#
+# Module-level mimetypes.guess_type() first calls init(), which reads the HOST's
+# table: /etc/mime.types on Linux and the Windows REGISTRY on Windows — where
+# Excel registers .csv as application/vnd.ms-excel, so the same upload got a
+# different Content-Type depending on the machine that sent it. An instance uses
+# only the built-in table, which lacks a few types attachments actually are.
+_MIME = mimetypes.MimeTypes()
+for _ext, _type in {
+    ".md": "text/markdown",
+    ".markdown": "text/markdown",
+    ".yaml": "application/yaml",
+    ".yml": "application/yaml",
+    ".log": "text/plain",
+}.items():
+    _MIME.add_type(_type, _ext)
+
 
 def guess_mimetype(filename):
     """The media type to send as the multipart file part's Content-Type.
@@ -795,7 +814,7 @@ def guess_mimetype(filename):
     reproduces the exact bug this function exists to fix, so when there is an
     encoding the container type wins and the inner type is discarded.
     """
-    mimetype, encoding = mimetypes.guess_type(filename)
+    mimetype, encoding = _MIME.guess_type(filename)
     if encoding:
         return ENCODING_MIMETYPES.get(encoding, "application/octet-stream")
     return mimetype or "application/octet-stream"

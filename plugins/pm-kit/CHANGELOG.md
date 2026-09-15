@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+### Native Windows
+
+- **The Asana MCP server and every Asana-direct skill now run on native Windows.** Both go
+  through `skills/_shared/pm-python.mjs`, a `node` launcher, replacing `pm-python.sh` — which
+  Claude Code could not spawn on Windows (it launches a server's command with no shell).
+  Skills also stop running bare `python3`, so on every OS they use the venv `/pm-setup` built.
+- `/pm-setup` finds the Windows venv interpreter (`Scripts\python.exe`), reads home from
+  `USERPROFILE` as Python does, and no longer points `$BROWSER` at a shell script there.
+- Python runs in UTF-8 mode; attachment MIME types come from Python's own table, not the host's
+  (the Windows registry reports `.csv` as Excel); the browser opener handles Git Bash.
+
+## Unreleased
+
 - **fix: `/pm-setup` completes on a headless or remote session.** Three faults, one flow. The
   setup form hung forever: the browser was opened BEFORE `serve_forever`, and since the socket is
   already bound and listening from the constructor, the request arrived, queued, and was never

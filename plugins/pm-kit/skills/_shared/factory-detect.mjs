@@ -26,6 +26,8 @@
  */
 
 import { execFileSync } from 'node:child_process';
+import { realpathSync } from 'node:fs';
+import { pathToFileURL } from 'node:url';
 
 /**
  * `owner/name` from a git remote URL, or null.
@@ -89,7 +91,7 @@ export function detectBranch(cwd = process.cwd()) {
   }
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (process.argv[1] && import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) {
   const slug = detectSlug();
   if (process.argv.includes('--slug')) {
     if (slug) process.stdout.write(slug);

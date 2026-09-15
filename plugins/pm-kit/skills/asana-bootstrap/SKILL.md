@@ -43,7 +43,7 @@ Before creating anything, search the workspace for an existing project with a si
 
 ```
 list_projects(scope="all")   # Asana MCP; then match by the proposed name's significant tokens
-# (or: python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/asana_ops.py --list-projects)
+# (or: node ${CLAUDE_PLUGIN_ROOT}/skills/_shared/pm-python.mjs asana_ops.py --list-projects)
 ```
 
 `scope="all"` is required here, not optional. The tool defaults to `"mine"` — the projects you are
@@ -79,10 +79,10 @@ Project creation isn't on the curated MCP (it omits structural mutations by desi
 
 ```
 # 1. Preview — prints the exact payload, creates nothing:
-python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/asana_ops.py --create-project '{"name":"<name>","team":"<team_gid>","notes":"<description>","default_view":"board"}' --dry-run
+node ${CLAUDE_PLUGIN_ROOT}/skills/_shared/pm-python.mjs asana_ops.py --create-project '{"name":"<name>","team":"<team_gid>","notes":"<description>","default_view":"board"}' --dry-run
 
 # 2. Show the user the preview, get the OK, then run live (drop --dry-run):
-python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/asana_ops.py --create-project '{"name":"<name>","team":"<team_gid>","notes":"<description>","default_view":"board"}'
+node ${CLAUDE_PLUGIN_ROOT}/skills/_shared/pm-python.mjs asana_ops.py --create-project '{"name":"<name>","team":"<team_gid>","notes":"<description>","default_view":"board"}'
 ```
 
 `--create-project` defaults `workspace` to the active one (override with a `"workspace"` key). It prints `{ok, project_gid, permalink, custom_fields}` — capture `project_gid`. Everything from Step 4 onward needs it.
@@ -99,7 +99,7 @@ If `custom_fields` comes back with an `error` key, the board was still created �
 deliberately non-fatal so a permissions problem can't cost you the project GID. Back-fill it with:
 
 ```
-python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/asana_ops.py --attach-fields <project_gid>
+node ${CLAUDE_PLUGIN_ROOT}/skills/_shared/pm-python.mjs asana_ops.py --attach-fields <project_gid>
 ```
 
 That command is idempotent, and also fixes boards created before this behaviour existed.
@@ -117,7 +117,7 @@ If the workspace has standard project templates, **do not use them** — they sh
 Run hygiene against the freshly-created project. It's idempotent and front-loads everything: admins, custom fields, sections, Release enum coverage.
 
 ```bash
-python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/asana_ops.py --hygiene <PROJECT_GID>
+node ${CLAUDE_PLUGIN_ROOT}/skills/_shared/pm-python.mjs asana_ops.py --hygiene <PROJECT_GID>
 ```
 
 What this attaches (per `${CLAUDE_PLUGIN_ROOT}/skills/asana-hygiene/SKILL.md` Step 2):
@@ -134,7 +134,7 @@ Hygiene doesn't auto-set `notes`, `start_on`, `due_on` — those need values you
 
 ```bash
 # Description / dates (PUT /projects/<gid>)
-python3 -c "
+node ${CLAUDE_PLUGIN_ROOT}/skills/_shared/pm-python.mjs -c "
 import sys; sys.path.insert(0, '${CLAUDE_PLUGIN_ROOT}/skills/_shared')
 from asana_ops import api
 api('PUT', '/projects/<PROJECT_GID>', {
@@ -154,7 +154,7 @@ If the user didn't supply `due_on`, leave it unset and **flag it in the final re
 Every project needs at least one phase so the Release custom field has a non-empty option set the moment cards are created. Default phase name: `Phase 1`. Apply via:
 
 ```bash
-python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/asana_ops.py --new-phase <PROJECT_GID> "Phase 1"
+node ${CLAUDE_PLUGIN_ROOT}/skills/_shared/pm-python.mjs asana_ops.py --new-phase <PROJECT_GID> "Phase 1"
 ```
 
 This call (per `create_new_phase` in `${CLAUDE_PLUGIN_ROOT}/skills/_shared/asana_ops.py`):
@@ -190,7 +190,7 @@ If the workspace uses portfolios for product or client grouping (Fraction conven
 
 ```bash
 # Not on the curated MCP — use the api() helper (POST /portfolios/<gid>/addItem):
-python3 -c "
+node ${CLAUDE_PLUGIN_ROOT}/skills/_shared/pm-python.mjs -c "
 import sys; sys.path.insert(0, '${CLAUDE_PLUGIN_ROOT}/skills/_shared')
 from asana_ops import api
 api('POST', '/portfolios/<PORTFOLIO_GID>/addItem', {'item': '<PROJECT_GID>'})

@@ -15,9 +15,9 @@
 //   node <pm-kit>/skills/_shared/check-add-card-alignment.mjs --json     # machine output
 //   node <pm-kit>/skills/_shared/check-add-card-alignment.mjs --strict   # exit 1 on drift
 
-import { readFileSync } from 'node:fs';
+import { readFileSync, realpathSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 // Both files it compares are siblings inside this plugin, so resolve relative to
 // THIS file, not the cwd. It used to read a project's docs/ and .claude/skills/,
@@ -233,7 +233,8 @@ function main() {
 
 // CLI/library duality — only run when invoked directly, not when imported by
 // scripts/pr-audit.mjs's loader (which sweeps every .mjs in this directory).
-const isMain = import.meta.url === `file://${process.argv[1]}`;
+const isMain =
+  process.argv[1] && import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href;
 if (isMain) main();
 
 export { checkAlignment };

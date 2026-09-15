@@ -47,7 +47,7 @@ and nothing below needs to care which.
 
 **Asana-direct**, resolve it via the Asana MCP's `list_projects(scope="all")` and match by
 name — the default scope is only the projects you belong to, and a named board you are not
-a member of must still resolve (or `python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/asana_ops.py --list-projects`).
+a member of must still resolve (or `node ${CLAUDE_PLUGIN_ROOT}/skills/_shared/pm-python.mjs asana_ops.py --list-projects`).
 
 If the user is ambiguous ("add a ticket about X"), check the active project. If still
 unclear, ask: "Which project — ELEVAT3, Paryani Construction, …?"
@@ -208,9 +208,9 @@ takes a column name including ones the factory has no state for.
 
 ### Asana-direct (no factory, or a board it does not know)
 
-`python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/asana_ops.py --create-task '<json>'` (or pipe the spec with `--create-task -`). The spec carries `name`, `notes`, `projects` (the resolved project gid), `section` (`"BACKLOG"` or `"INBOX"` — resolved within the project), `custom_fields` (`{field_gid: value}` — only those required for the target section per Step 4, **including `Feature`**), `sprint` (`[enum_option_gid]` — applied via a follow-up PUT since multi_enum can't be set on create), and `audit_tag: true` (stamps Marker A — see Step 6.5 — automatically). One call creates the task, places it in the section, applies the fields, and tags it; it prints `{ok, task_gid, permalink, warnings}`. The curated `asana` MCP **deliberately omits raw task creation** (it exposes only `capture_inbox_idea` for light INBOX capture), so rich BACKLOG creation runs through the script — still first-party, never a third-party Asana MCP.
+`node ${CLAUDE_PLUGIN_ROOT}/skills/_shared/pm-python.mjs asana_ops.py --create-task '<json>'` (or pipe the spec with `--create-task -`). The spec carries `name`, `notes`, `projects` (the resolved project gid), `section` (`"BACKLOG"` or `"INBOX"` — resolved within the project), `custom_fields` (`{field_gid: value}` — only those required for the target section per Step 4, **including `Feature`**), `sprint` (`[enum_option_gid]` — applied via a follow-up PUT since multi_enum can't be set on create), and `audit_tag: true` (stamps Marker A — see Step 6.5 — automatically). One call creates the task, places it in the section, applies the fields, and tags it; it prints `{ok, task_gid, permalink, warnings}`. The curated `asana` MCP **deliberately omits raw task creation** (it exposes only `capture_inbox_idea` for light INBOX capture), so rich BACKLOG creation runs through the script — still first-party, never a third-party Asana MCP.
 
-**Always top-level — never pass `parent`.** The flat-task policy (`${CLAUDE_PLUGIN_ROOT}/skills/_shared/asana-conventions.md` → "Task structure") forbids subtasks for workflow items: Asana can't move a subtask between board sections, so it would be stuck off the board forever. The epic association is carried by the **`Feature`** field, not by nesting. If you ever need to relate a card to an epic definition card, set matching `Feature` values — do not set `parent`. (Legacy subtasks found in a project are elevated with `python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/asana_ops.py --elevate-subtasks <PROJECT_GID>`.)
+**Always top-level — never pass `parent`.** The flat-task policy (`${CLAUDE_PLUGIN_ROOT}/skills/_shared/asana-conventions.md` → "Task structure") forbids subtasks for workflow items: Asana can't move a subtask between board sections, so it would be stuck off the board forever. The epic association is carried by the **`Feature`** field, not by nesting. If you ever need to relate a card to an epic definition card, set matching `Feature` values — do not set `parent`. (Legacy subtasks found in a project are elevated with `node ${CLAUDE_PLUGIN_ROOT}/skills/_shared/pm-python.mjs asana_ops.py --elevate-subtasks <PROJECT_GID>`.)
 
 ## Step 6: Source attribution (mandatory)
 
@@ -222,7 +222,7 @@ Per `feedback_pm_source_attribution.md` and `asana-hygiene` Step 7 — **two-ste
    carries a `Source:` line naming YOU, added by the engine and not suppressible;
    that is provenance for *who ran the skill*, which is a different fact from the
    `Source:` line above (*where the requirement came from*). Both belong there.
-   Asana-direct with rich HTML: `python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/asana_ops.py --post-comment <gid> '<body>...</body>'`.
+   Asana-direct with rich HTML: `node ${CLAUDE_PLUGIN_ROOT}/skills/_shared/pm-python.mjs asana_ops.py --post-comment <gid> '<body>...</body>'`.
 
 Even when the user says "I just thought of this" — record it: `Source: ad-hoc — user request 2026-04-27`. The trail's value is consistency, not just provenance. **For INBOX cards this rule is non-negotiable** — without source attribution, an INBOX item is just untraced noise.
 
@@ -236,7 +236,7 @@ Attach the well-known label `devhawk:add-card` to the new card. If the label/tag
 
 | System | How |
 |---|---|
-| **Asana** | Handled automatically by Step 5: `--create-task` stamps the tag when `audit_tag: true` (the default) — it ensures the workspace tag exists, then attaches it. To (re)create the tag standalone, run `python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/asana_ops.py --ensure-audit-tag` (idempotent; prints the gid). The curated MCP can attach an existing tag but cannot create workspace tags, which is why this lives in the script. Cache the gid in `.devhawk-work.json` for reuse. |
+| **Asana** | Handled automatically by Step 5: `--create-task` stamps the tag when `audit_tag: true` (the default) — it ensures the workspace tag exists, then attaches it. To (re)create the tag standalone, run `node ${CLAUDE_PLUGIN_ROOT}/skills/_shared/pm-python.mjs asana_ops.py --ensure-audit-tag` (idempotent; prints the gid). The curated MCP can attach an existing tag but cannot create workspace tags, which is why this lives in the script. Cache the gid in `.devhawk-work.json` for reuse. |
 | **Linear** | Issue label. Linear's MCP can create labels directly — call its create-issue-label capability for `devhawk:add-card` if missing, then include the label id on creation. |
 | **Through the factory** | Not available — label and tag creation is not on the connector interface, on purpose (it would put board-admin reach into a project-shared credential). Say so once and rely on Marker B, which is what the audit scripts read. |
 

@@ -118,7 +118,7 @@ When the user writes `@<name>` in their input:
    factory posts PLAIN TEXT, so an Asana `@`-mention cannot be rendered as a link — write
    the person's name and say the mention is not clickable, rather than emitting markup the
    board will show verbatim.
-1. **Asana, direct** — resolve the user via `python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/asana_ops.py --find-user "<name>"` (matches name/email substring; prints `gid<TAB>name<TAB>email` per hit). Disambiguate by full name + email if multiple. Replace `@Jane` with `<a data-asana-gid="<user-gid>">@Jane</a>`. If no match, leave as plain text and warn the user. (User lookup isn't on the curated MCP, so it runs through the script — still first-party.)
+1. **Asana, direct** — resolve the user via `node ${CLAUDE_PLUGIN_ROOT}/skills/_shared/pm-python.mjs asana_ops.py --find-user "<name>"` (matches name/email substring; prints `gid<TAB>name<TAB>email` per hit). Disambiguate by full name + email if multiple. Replace `@Jane` with `<a data-asana-gid="<user-gid>">@Jane</a>`. If no match, leave as plain text and warn the user. (User lookup isn't on the curated MCP, so it runs through the script — still first-party.)
 2. **Linear** — search users via MCP. Replace with the form Linear's API expects (typically `@<display-name>`).
 3. **Jira** — Atlassian uses account IDs in mentions: `[~accountid:<id>]` for wiki markup, or the `mention` ADF node. Resolve with the connected Atlassian MCP's account-id lookup (`lookupJiraAccountId`).
 
@@ -164,7 +164,7 @@ or an ADF table, use the direct path below and say which you used.
 
 | System | How |
 |---|---|
-| **Asana** | Prefer our first-party Asana MCP's `add_comment` (plain text). For rich HTML, or if that MCP isn't connected, fall back to `python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/asana_ops.py --post-comment <task_gid> '<html>'`. Never use other Asana MCPs (the official plugin / community / claude.ai connectors are superseded). |
+| **Asana** | Prefer our first-party Asana MCP's `add_comment` (plain text). For rich HTML, or if that MCP isn't connected, fall back to `node ${CLAUDE_PLUGIN_ROOT}/skills/_shared/pm-python.mjs asana_ops.py --post-comment <task_gid> '<html>'`. Never use other Asana MCPs (the official plugin / community / claude.ai connectors are superseded). |
 | **Linear** | Linear MCP `createComment` with `body: <markdown>`. |
 | **Jira** | The connected Atlassian MCP's add-comment tool (`addCommentToJiraIssue`), with the assembled body. |
 

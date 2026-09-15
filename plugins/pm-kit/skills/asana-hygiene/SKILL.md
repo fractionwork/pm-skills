@@ -26,7 +26,7 @@ Use Asana MCP to list projects, or ask the builder for the project GID/name.
 ## Step 2: Run the audit + fix
 
 ```bash
-python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/asana_ops.py --hygiene <PROJECT_GID>
+node ${CLAUDE_PLUGIN_ROOT}/skills/_shared/pm-python.mjs asana_ops.py --hygiene <PROJECT_GID>
 ```
 
 This runs the full audit and auto-fixes:
@@ -48,7 +48,7 @@ This runs the full audit and auto-fixes:
 - **Empty descriptions:** reports tasks with no description (applies to all sections — INBOX still requires a 1-2 sentence description + Source line)
 - **Missing Feature (excl. INBOX):** non-EPIC tasks with no `Feature` value. `Feature` is free-text and **per-project**, so hygiene **auto-fills only when the project already uses exactly one Feature** (unambiguous → blanks inherit it); with zero or multiple epics in play it reports for triage (the value is a judgement call). INBOX exempt — Feature is set at the INBOX → BACKLOG promotion.
 - **Missing Theme (excl. INBOX):** non-EPIC tasks with no `Theme` value. `Theme` is free-text and **per-project** (no shared enum), so hygiene **auto-fills only when the project already uses exactly one Theme** (unambiguous → blanks inherit it); with zero or multiple themes in play it reports for triage (the value is a judgement call). INBOX exempt.
-- **Subtasks present (flat-model violation):** reports any task that still has a parent, or still owns subtasks. Asana can't move a subtask between board sections, so these are stuck. Fix with `python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/asana_ops.py --elevate-subtasks <PROJECT_GID>` (non-destructive — see `${CLAUDE_PLUGIN_ROOT}/skills/_shared/asana-conventions.md` → "Subtask elevation"). Also catches the dual state (member of a project *and* still parented).
+- **Subtasks present (flat-model violation):** reports any task that still has a parent, or still owns subtasks. Asana can't move a subtask between board sections, so these are stuck. Fix with `node ${CLAUDE_PLUGIN_ROOT}/skills/_shared/pm-python.mjs asana_ops.py --elevate-subtasks <PROJECT_GID>` (non-destructive — see `${CLAUDE_PLUGIN_ROOT}/skills/_shared/asana-conventions.md` → "Subtask elevation"). Also catches the dual state (member of a project *and* still parented).
 - **Non-standard sections:** reports any sections beyond the 8 standards (INBOX → DONE)
 
 ## Step 3: Manual follow-up
@@ -61,7 +61,7 @@ If start_on, due_on, or notes are missing, ask the builder:
 - "What's the target completion date?"
 - "Give me a one-liner for the project description."
 
-Then set via: `python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/asana_ops.py` REST calls or MCP.
+Then set via: `node ${CLAUDE_PLUGIN_ROOT}/skills/_shared/pm-python.mjs asana_ops.py` REST calls or MCP.
 
 ### Vague titles
 Show the list of vague titles. Ask: "Should I rename these to be more actionable?" Propose clearer titles based on the description.
@@ -76,7 +76,7 @@ Don't auto-assign — report the count and ask who should own them.
 
 If stories lack estimates, run:
 ```bash
-python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/asana_ops.py --estimate <PROJECT_GID>
+node ${CLAUDE_PLUGIN_ROOT}/skills/_shared/pm-python.mjs asana_ops.py --estimate <PROJECT_GID>
 ```
 
 Estimates based on description complexity: 1 (trivial) → 2 (small) → 3 (medium) → 5 (large) → 8 (complex). Signals: word count, keywords (integrate/architecture/pipeline = complex, fix/rename/cleanup = simple).
@@ -87,7 +87,7 @@ These are rough estimates for sorting — the builder should refine during sprin
 
 To move a task to a section:
 ```bash
-python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/asana_ops.py --move-section <TASK_GID> <SECTION_GID>
+node ${CLAUDE_PLUGIN_ROOT}/skills/_shared/pm-python.mjs asana_ops.py --move-section <TASK_GID> <SECTION_GID>
 ```
 
 ### Bulk operations: mute notifications
@@ -143,7 +143,7 @@ When creating new tasks (bootstrap, enrichment, or manually), always set the Rel
 
 To add a new release option:
 ```bash
-python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/asana_ops.py --add-release-option "Phase 5"
+node ${CLAUDE_PLUGIN_ROOT}/skills/_shared/pm-python.mjs asana_ops.py --add-release-option "Phase 5"
 ```
 
 ## Step 5c: Sprint field population
@@ -155,7 +155,7 @@ The **Sprint** multi_enum field (GID from `requiredFields` in `~/.devhawk/pm/wor
 **Multi-select rationale**: a task carrying over to the next sprint can carry both tags so velocity reports correctly attribute completion.
 
 **TODO = active sprint only**: items not in the current sprint should live in BACKLOG. When opening a new sprint:
-1. Add the option: `python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/asana_ops.py --add-sprint-option "Sprint 4/14-4/21"`
+1. Add the option: `node ${CLAUDE_PLUGIN_ROOT}/skills/_shared/pm-python.mjs asana_ops.py --add-sprint-option "Sprint 4/14-4/21"`
 2. Tag the committed tasks
 3. Move all unsprinted tasks from TODO → BACKLOG (Asana view: filter `Sprint is empty AND Section = TODO`, then bulk-move)
 
@@ -200,7 +200,7 @@ How would you like to handle this?
   (4) **Defer** — skip; surface again on next hygiene run.
 ```
 
-**Bulk-mute notification rule applies** (per Step 5 → "Bulk operations"): when merging >5 pairs in one session, suppress assignee/follower notifications on the close side. Neither our `asana` MCP nor `asana_ops.py` exposes a `silent` flag yet — so post the merge comment first, then close the duplicate with `python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/asana_ops.py --complete-task <gid>`, accepting that watchers may still see the close in their Inbox.
+**Bulk-mute notification rule applies** (per Step 5 → "Bulk operations"): when merging >5 pairs in one session, suppress assignee/follower notifications on the close side. Neither our `asana` MCP nor `asana_ops.py` exposes a `silent` flag yet — so post the merge comment first, then close the duplicate with `node ${CLAUDE_PLUGIN_ROOT}/skills/_shared/pm-python.mjs asana_ops.py --complete-task <gid>`, accepting that watchers may still see the close in their Inbox.
 
 Always quote at least one specific signal — vague "looks similar" produces noise the user can't act on.
 
@@ -215,7 +215,7 @@ Report explicitly: "No likely duplicate pairs in `<project>`." This confirms the
 ### The two-step rule
 
 1. **Edit the description** with a `Source: …` line so the attribution travels with the artifact.
-2. **Post a comment** via the Asana MCP's `add_comment` (plain text), or `python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/asana_ops.py --post-comment <gid> '<body>...</body>'` for rich HTML, quoting the specific evidence. Descriptions get rewritten; comments are an immutable audit trail.
+2. **Post a comment** via the Asana MCP's `add_comment` (plain text), or `node ${CLAUDE_PLUGIN_ROOT}/skills/_shared/pm-python.mjs asana_ops.py --post-comment <gid> '<body>...</body>'` for rich HTML, quoting the specific evidence. Descriptions get rewritten; comments are an immutable audit trail.
 
 Both steps are required. Skipping the comment is the most common failure mode — don't.
 
@@ -265,7 +265,7 @@ All newly created tasks from external source enrichment go to the **BACKLOG** se
 - Set the `Feature` field to the appropriate epic (and `Theme` if known) — **as a top-level task; never create it as a subtask**
 - Do NOT assign — leave unassigned for triage
 
-**Flat-task rule — never create a subtask for a workflow item.** Asana can't move a subtask between board sections, so it can never flow INBOX → DONE. Always create tasks top-level with `projects` / `memberships` set, and carry the epic via the `Feature` field instead of a `parent`. If you ever find subtasks (legacy data, or another tool created them), elevate them: `python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/asana_ops.py --elevate-subtasks <PROJECT_GID>` (non-destructive — keeps gid, comments, attachments; copies the parent's Feature/Theme onto each child). See `${CLAUDE_PLUGIN_ROOT}/skills/_shared/asana-conventions.md` → "Subtask elevation".
+**Flat-task rule — never create a subtask for a workflow item.** Asana can't move a subtask between board sections, so it can never flow INBOX → DONE. Always create tasks top-level with `projects` / `memberships` set, and carry the epic via the `Feature` field instead of a `parent`. If you ever find subtasks (legacy data, or another tool created them), elevate them: `node ${CLAUDE_PLUGIN_ROOT}/skills/_shared/pm-python.mjs asana_ops.py --elevate-subtasks <PROJECT_GID>` (non-destructive — keeps gid, comments, attachments; copies the parent's Feature/Theme onto each child). See `${CLAUDE_PLUGIN_ROOT}/skills/_shared/asana-conventions.md` → "Subtask elevation".
 
 ### Step 7d: Report summary
 
