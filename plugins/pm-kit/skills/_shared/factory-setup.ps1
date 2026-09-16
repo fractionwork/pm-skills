@@ -161,8 +161,8 @@ function Get-KitWindowsStatus {
   switch ($Kit) {
     'factory-kit' { @{ State = 'ok';       Note = '' } }
     'devhawk-kit' { @{ State = 'ok';       Note = '' } }
-    'pykit'       { @{ State = 'degraded'; Note = 'the scaffold it generates drives its gates through make, which Windows lacks' } }
-    'ship-kit'    { @{ State = 'degraded'; Note = 'pr-watch, card-done, create-pr and security-brief need jq; Python repos need make' } }
+    'pykit'       { @{ State = 'ok';       Note = '' } }
+    'ship-kit'    { @{ State = 'ok';       Note = '' } }
     'audit-kit'   { @{ State = 'degraded'; Note = 'scanners install by hand - /audit-install-scanners has no Windows path yet' } }
     'pm-kit'      { @{ State = 'ok';       Note = '' } }
     default       { @{ State = 'ok';       Note = '' } }
