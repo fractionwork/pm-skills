@@ -163,7 +163,7 @@ function Get-KitWindowsStatus {
     'devhawk-kit' { @{ State = 'ok';       Note = '' } }
     'pykit'       { @{ State = 'ok';       Note = '' } }
     'ship-kit'    { @{ State = 'ok';       Note = '' } }
-    'audit-kit'   { @{ State = 'degraded'; Note = 'scanners install by hand - /audit-install-scanners has no Windows path yet' } }
+    'audit-kit'   { @{ State = 'degraded'; Note = 'semgrep has no native Windows build upstream - the other four scanners install' } }
     'pm-kit'      { @{ State = 'ok';       Note = '' } }
     default       { @{ State = 'ok';       Note = '' } }
   }
@@ -552,6 +552,23 @@ function Invoke-PhasePlugins {
     Write-Host ''
     Write-Say 'pm-kit: run /pm-setup inside Claude Code to connect your own Asana account,'
     Write-Say 'or /factory-connect to manage boards through the factory instead.'
+  }
+
+  if ($Kits -contains 'devhawk-kit') {
+    # Its skills are .mjs, but /do-deploy drives DigitalOcean from Git Bash and
+    # reads doctl's JSON with jq. Neither ships with Git for Windows, and the
+    # failure is a shell one-liner printing nothing rather than a missing tool.
+    Write-Host ''
+    if (Confirm-Step 'install the DigitalOcean deploy tools (doctl, jq)?' 'no') {
+      Install-WingetPackage -Id 'DigitalOcean.Doctl' -Label 'doctl' -ProbeCommand 'doctl' | Out-Null
+      Install-WingetPackage -Id 'jqlang.jq'          -Label 'jq'    -ProbeCommand 'jq'    | Out-Null
+      # psql deliberately not installed here: winget only offers it inside the
+      # full PostgreSQL server package, whose installer is interactive. Anyone
+      # running migrations by hand installs the client themselves.
+      if (-not (Test-Have 'psql')) { Write-Say 'psql is not installed - /db-migrate needs it; the PostgreSQL client install provides it' }
+    } else {
+      Write-Say 'skipped - everything except /do-deploy works without them'
+    }
   }
 
   if ($Kits -contains 'audit-kit') {
